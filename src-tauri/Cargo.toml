@@ -32,7 +32,7 @@ reqwest = { version = "0.13", features = ["json", "stream"] }
 tokio = { version = "1", features = ["process", "io-util", "time", "fs", "macros", "net", "rt-multi-thread", "sync"] }
 futures-util = "0.3"
 dirs = "6"
-zip = "4"
+zip = "8"
 uuid = { version = "1", features = ["v4"] }
 percent-encoding = "2"
 sha2 = "0.11"

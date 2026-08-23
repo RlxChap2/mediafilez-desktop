@@ -23,6 +23,7 @@ type SettingsDialogProps = {
   autoStart: boolean;
   showAdvanced: boolean;
   communityFallback: boolean;
+  instagramProxyFallback: boolean;
   concurrency: number;
   cookiesFromBrowser: boolean;
   cookieBrowser: CookieBrowser;
@@ -37,6 +38,7 @@ type SettingsDialogProps = {
   onAutoStartChange: (value: boolean) => void;
   onShowAdvancedChange: (value: boolean) => void;
   onCommunityFallbackChange: (value: boolean) => void;
+  onInstagramProxyFallbackChange: (value: boolean) => void;
   onConcurrencyChange: (value: number) => void;
   onCookiesFromBrowserChange: (value: boolean) => void;
   onCookieBrowserChange: (value: CookieBrowser) => void;
@@ -62,6 +64,7 @@ export function SettingsDialog({
   autoStart,
   showAdvanced,
   communityFallback,
+  instagramProxyFallback,
   concurrency,
   cookiesFromBrowser,
   cookieBrowser,
@@ -76,6 +79,7 @@ export function SettingsDialog({
   onAutoStartChange,
   onShowAdvancedChange,
   onCommunityFallbackChange,
+  onInstagramProxyFallbackChange,
   onConcurrencyChange,
   onCookiesFromBrowserChange,
   onCookieBrowserChange,
@@ -134,7 +138,7 @@ export function SettingsDialog({
             <div className="section-title-row">
               <div>
                 <h3>Download folder</h3>
-                <p>rsdownit never overwrites an existing file.</p>
+                <p>MediaFilez never overwrites an existing file.</p>
               </div>
               <button type="button" className="secondary-button" onClick={onChooseFolder}>
                 <FolderOpen aria-hidden="true" />
@@ -174,7 +178,7 @@ export function SettingsDialog({
             <label className="toggle-row">
               <span>
                 <strong>Show advanced options</strong>
-                <small>Show bitrate, browser session, and API controls.</small>
+                <small>Show muted video, bitrate, browser session, and fallback controls.</small>
               </span>
               <Switch checked={showAdvanced} onCheckedChange={onShowAdvancedChange} aria-label="Show advanced options" />
             </label>
@@ -260,14 +264,14 @@ export function SettingsDialog({
               <section className="settings-section">
                 <div className="section-title-row">
                   <div>
-                    <h3>Self-hosted Cobalt API</h3>
-                    <p>Optional fallback for an instance you run or have permission to use.</p>
+                    <h3>Authorized Cobalt pool</h3>
+                    <p>Try self-hosted or owner-approved v11 instances in this order.</p>
                   </div>
                   <KeyRound aria-hidden="true" />
                 </div>
                 <label className="field-group compact">
-                  <span>HTTPS endpoint</span>
-                  <Input
+                  <span>HTTPS endpoints</span>
+                  <textarea
                     value={apiProvider.baseUrl}
                     onChange={(event) =>
                       onApiProviderChange({
@@ -276,9 +280,10 @@ export function SettingsDialog({
                         enabled: Boolean(event.currentTarget.value.trim()),
                       })
                     }
-                    placeholder="https://cobalt.example.com"
+                    placeholder={"https://cobalt-one.example\nhttps://cobalt-two.example"}
                     inputMode="url"
                   />
+                  <small>One endpoint per line. The first valid media response wins.</small>
                 </label>
                 <div className="settings-grid two-fields">
                   <label className="field-group compact">
@@ -315,8 +320,8 @@ export function SettingsDialog({
               <section className="settings-section warning-section">
                 <label className="toggle-row">
                   <span>
-                    <strong>Community Cobalt servers</strong>
-                    <small>Your media URL is sent to third-party servers. Instance availability and privacy vary.</small>
+                    <strong>Community Cobalt directory</strong>
+                    <small>Legacy opt-in. Prefer endpoints whose owners gave you access.</small>
                   </span>
                   <Switch
                     checked={communityFallback}
@@ -328,6 +333,21 @@ export function SettingsDialog({
                   <CircleAlert aria-hidden="true" />
                   Off by default. Use only servers whose owners permit third-party clients.
                 </p>
+                <label className="toggle-row fallback-toggle">
+                  <span>
+                    <strong>Instagram embed fallback</strong>
+                    <small>Last attempt for public Instagram posts. Cookies and API tokens are never sent.</small>
+                  </span>
+                  <Switch
+                    checked={instagramProxyFallback}
+                    onCheckedChange={onInstagramProxyFallbackChange}
+                    aria-label="Instagram embed fallback"
+                  />
+                </label>
+                <p className="warning-copy">
+                  <CircleAlert aria-hidden="true" />
+                  Experimental third-party service. Returned files still pass URL, redirect, type, and content checks.
+                </p>
               </section>
             </>
           )}
@@ -338,6 +358,7 @@ export function SettingsDialog({
               <div>
                 <h3>Engine integrity</h3>
                 <p>yt-dlp: {toolSummary(tools?.ytDlp)}</p>
+                <p>gallery-dl: {toolSummary(tools?.galleryDl)}</p>
                 <p>Deno: {toolSummary(tools?.deno)}</p>
                 <p>FFmpeg: {toolSummary(tools?.ffmpeg)}</p>
               </div>

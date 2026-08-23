@@ -9,20 +9,21 @@ beforeEach(() => {
   window.history.replaceState({}, "", "/");
 });
 
-describe("rsdownit app shell", () => {
+describe("MediaFilez Desktop app shell", () => {
   it("renders the focused downloader workbench", async () => {
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: "rsdownit" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "MediaFilez" })).toBeVisible();
     expect(
-      screen.getByRole("heading", { name: "Download from almost anywhere." }),
+      screen.getByRole("heading", { name: "Download media" }),
     ).toBeVisible();
     expect(screen.getByLabelText("Media link")).toBeVisible();
     expect(screen.getByRole("button", { name: "Paste" })).toBeVisible();
     expect(screen.getByRole("group", { name: "Download mode" })).toBeVisible();
     expect(screen.getByRole("button", { name: /Video/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Image/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /Audio/ })).toBeVisible();
-    expect(screen.getByRole("button", { name: /Muted/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Thumbnail|Muted/ })).not.toBeInTheDocument();
     expect(screen.getByText("No downloads yet.")).toBeVisible();
     expect((await screen.findAllByText("Downloads")).length).toBeGreaterThan(0);
     expect(await screen.findByText("Engine ready")).toBeVisible();
@@ -32,7 +33,7 @@ describe("rsdownit app shell", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    expect(screen.queryByText("Self-hosted Cobalt API")).not.toBeInTheDocument();
+    expect(screen.queryByText("Authorized Cobalt pool")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Settings" }));
 
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeVisible();
@@ -42,10 +43,11 @@ describe("rsdownit app shell", () => {
     expect(screen.queryByRole("switch", { name: "Community fallback servers" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("switch", { name: "Show advanced options" }));
-    expect(await screen.findByText("Self-hosted Cobalt API")).toBeVisible();
-    expect(screen.getByPlaceholderText("https://cobalt.example.com")).toBeVisible();
+    expect(await screen.findByText("Authorized Cobalt pool")).toBeVisible();
+    expect(screen.getByPlaceholderText(/https:\/\/cobalt-one\.example/)).toBeVisible();
     expect(screen.getByRole("switch", { name: "Use browser session" })).toBeVisible();
     expect(screen.getByRole("switch", { name: "Community fallback servers" })).toBeVisible();
+    expect(screen.getByRole("switch", { name: "Instagram embed fallback" })).toBeVisible();
 
     await user.click(screen.getByRole("switch", { name: "Use browser session" }));
     expect(screen.getByRole("option", { name: "Mozilla Firefox (recommended)" })).toBeInTheDocument();

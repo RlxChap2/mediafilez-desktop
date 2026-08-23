@@ -62,6 +62,12 @@ pub fn build_ytdlp_args(
                 args.push(format!("{audio_bitrate}K"));
             }
         }
+        DownloadMode::Image => {
+            args.push("--write-thumbnail".to_string());
+            args.push("--skip-download".to_string());
+            args.push("--convert-thumbnails".to_string());
+            args.push("jpg".to_string());
+        }
         DownloadMode::MutedVideo => {
             args.push("-f".to_string());
             args.push("bestvideo*".to_string());

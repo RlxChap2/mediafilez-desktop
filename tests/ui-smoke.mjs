@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { createServer } from "vite";
 
-const externalUrl = process.env.RSDOWNIT_TEST_URL;
+const externalUrl = process.env.MEDIAFILEZ_TEST_URL;
 const server = externalUrl
   ? null
   : await createServer({ server: { port: 4173, strictPort: false, hmr: false } });
@@ -22,9 +22,9 @@ try {
   await page.goto(url);
   await page.waitForLoadState("networkidle");
 
-  await expectVisible(page.getByRole("heading", { name: "rsdownit" }), "brand");
+  await expectVisible(page.getByRole("heading", { name: "MediaFilez" }), "brand");
   await expectVisible(
-    page.getByRole("heading", { name: "Download from almost anywhere." }),
+    page.getByRole("heading", { name: "Download media" }),
     "download heading",
   );
   await expectVisible(page.getByLabel("Media link"), "URL input");
@@ -58,8 +58,9 @@ try {
   if (selectedBrowser !== "firefox") throw new Error("Firefox is not the default sign-in browser");
   await page.getByRole("button", { name: "Choose file" }).click();
   await expectVisible(page.getByText("C:\\Users\\Demo\\cookies.txt"), "cookie file selection");
-  await expectVisible(page.getByText("Self-hosted Cobalt API"), "self-hosted fallback");
+  await expectVisible(page.getByText("Authorized Cobalt pool"), "authorized Cobalt pool");
   await expectVisible(page.getByRole("switch", { name: "Community fallback servers" }), "community fallback");
+  await expectVisible(page.getByRole("switch", { name: "Instagram embed fallback" }), "Instagram fallback");
   await page.getByRole("button", { name: "Close settings" }).click();
 
   for (const width of [320, 375, 414, 768, 820, 1024, 1180, 1440]) {

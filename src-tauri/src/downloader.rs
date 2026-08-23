@@ -22,19 +22,32 @@ use crate::providers::cobalt::{
 use crate::providers::direct::{
     extract_media_links_from_html, is_direct_media_url, is_stream_manifest_url,
 };
+use crate::providers::gallery_dl::{build_gallery_dl_args, supports_mode as gallery_supports_mode};
+use crate::providers::instagram::proxy_url as instagram_proxy_url;
 use crate::providers::yt_dlp::build_ytdlp_args;
 use crate::security::{
-    is_safe_download_filename, secure_get, secure_redirect_policy, validate_api_endpoint,
-    validate_remote_target, validate_remote_url,
+    is_safe_download_filename, secure_get, secure_post_json, validate_remote_target,
+    validate_remote_url,
 };
-use crate::settings::{ApiProviderSettings, AppSettings, CookieSource};
+use crate::settings::{cobalt_endpoints, ApiProviderSettings, AppSettings, CookieSource};
 use crate::storage::{next_available_path, sanitize_filename};
 use crate::tools;
 
 pub const DOWNLOAD_EVENT: &str = "download://update";
+const APP_USER_AGENT: &str = concat!("MediaFilez Desktop/", env!("CARGO_PKG_VERSION"));
+const BROWSER_USER_AGENT: &str = concat!(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MediaFilez-Desktop/",
+    env!("CARGO_PKG_VERSION")
+);
+const DIRECTORY_USER_AGENT: &str = concat!(
+    "MediaFilez Desktop/",
+    env!("CARGO_PKG_VERSION"),
+    " (github.com/RlxChap2/mediafilez-desktop)"
+);
 const MAX_API_RESPONSE_BYTES: usize = 1024 * 1024;
 const MAX_HTML_BYTES: usize = 5 * 1024 * 1024;
 const MAX_STDERR_LINES: usize = 200;
+const MAX_PROVIDER_ERROR_CHARS: usize = 360;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,6 +98,7 @@ pub type JobSink<'a> = &'a (dyn Fn(JobUpdate) + Send + Sync);
 /// Resolved external tool locations for one job run.
 pub struct EngineTools {
     pub yt_dlp_path: Option<String>,
+    pub gallery_dl_path: Option<String>,
     /// Deno is required by current yt-dlp releases for full YouTube support.
     pub deno_path: Option<String>,
     /// Directory containing a managed ffmpeg.exe, when the system has none.
@@ -101,7 +115,7 @@ impl Default for JobManager {
     fn default() -> Self {
         Self {
             cancel_flags: Arc::new(Mutex::new(HashMap::new())),
-            slots: Arc::new(tokio::sync::Semaphore::new(2)),
+            slots: Arc::new(tokio::sync::Semaphore::new(4)),
         }
     }
 }
@@ -263,20 +277,84 @@ async fn publish_without_overwrite(temp: &Path, requested: PathBuf) -> Result<Pa
     }
 }
 
+async fn validate_downloaded_file(path: &Path) -> Result<(), String> {
+    let metadata = tokio::fs::metadata(path)
+        .await
+        .map_err(|error| format!("Could not inspect downloaded media: {error}"))?;
+    if !metadata.is_file() || metadata.len() == 0 {
+        return Err("The provider produced an empty file.".to_string());
+    }
+
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|error| format!("Could not verify downloaded media: {error}"))?;
+    let mut header = [0_u8; 64];
+    let read = tokio::io::AsyncReadExt::read(&mut file, &mut header)
+        .await
+        .map_err(|error| format!("Could not verify downloaded media: {error}"))?;
+    let text = String::from_utf8_lossy(&header[..read]);
+    let trimmed = text.trim_start().to_ascii_lowercase();
+    if trimmed.starts_with('<')
+        || trimmed.starts_with('{')
+        || trimmed.starts_with('[')
+        || trimmed.starts_with("error:")
+    {
+        return Err("The provider returned a web or error document instead of media.".to_string());
+    }
+    Ok(())
+}
+
+fn response_matches_mode(response: &reqwest::Response, url: &str, mode: &DownloadMode) -> bool {
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    media_type_matches_mode(&content_type, url, mode)
+}
+
+fn media_type_matches_mode(content_type: &str, url: &str, mode: &DownloadMode) -> bool {
+    if content_type.starts_with("image/") {
+        return *mode == DownloadMode::Image;
+    }
+    if content_type.starts_with("audio/") {
+        return *mode == DownloadMode::Audio;
+    }
+    if content_type.starts_with("video/") {
+        return matches!(mode, DownloadMode::Video | DownloadMode::MutedVideo);
+    }
+    if has_image_extension(url) {
+        return *mode == DownloadMode::Image;
+    }
+    if has_audio_extension(url) {
+        return *mode == DownloadMode::Audio;
+    }
+    if is_direct_media_url(url) && !is_stream_manifest_url(url) {
+        return matches!(mode, DownloadMode::Video | DownloadMode::MutedVideo);
+    }
+    true
+}
+
+pub(crate) struct StreamTarget<'a> {
+    pub provider: ProviderKind,
+    pub mode: &'a DownloadMode,
+    pub url: &'a str,
+    pub output_dir: &'a str,
+    pub file_name_hint: Option<String>,
+}
+
 /// Streams a URL straight to the output folder. Used by the direct provider
 /// and to fetch resolved links from the API and HTML providers.
-pub async fn stream_to_file(
+pub(crate) async fn stream_to_file(
     sink: JobSink<'_>,
     id: &str,
-    provider: ProviderKind,
-    url: &str,
-    output_dir: &str,
-    file_name_hint: Option<String>,
+    target: StreamTarget<'_>,
     cancel: &AtomicBool,
 ) -> Result<PathBuf, String> {
     let response = secure_get(
-        url,
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) rsdownit",
+        target.url,
+        BROWSER_USER_AGENT,
         std::time::Duration::from_secs(30),
     )
     .await?
@@ -289,20 +367,27 @@ pub async fn stream_to_file(
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| {
             let value = value.to_ascii_lowercase();
-            value.starts_with("text/html") || value.starts_with("application/xhtml")
+            value.starts_with("text/")
+                || value.starts_with("application/xhtml")
+                || value.starts_with("application/json")
+                || value.starts_with("application/xml")
         })
     {
         return Err("The resolved link returned a web page instead of media.".to_string());
     }
+    if !response_matches_mode(&response, target.url, target.mode) {
+        return Err("The provider returned a different media type than requested.".to_string());
+    }
 
     let total = response.content_length();
-    let name = file_name_hint
+    let name = target
+        .file_name_hint
         .map(|hint| sanitize_filename(&hint))
-        .unwrap_or_else(|| filename_from_url(url));
+        .unwrap_or_else(|| filename_from_url(target.url));
     if !is_safe_download_filename(&name) {
         return Err("The server suggested an unsafe executable filename.".to_string());
     }
-    let requested = Path::new(output_dir).join(&name);
+    let requested = Path::new(target.output_dir).join(&name);
     let temp = requested.with_file_name(format!(".{name}.{}.part", Uuid::new_v4()));
 
     let mut file = tokio::fs::OpenOptions::new()
@@ -342,7 +427,7 @@ pub async fn stream_to_file(
             let elapsed = started.elapsed().as_secs_f64().max(0.001);
             let speed = downloaded as f64 / elapsed;
             let mut update = JobUpdate::new(id, "downloading");
-            update.provider = Some(provider);
+            update.provider = Some(target.provider);
             update.speed = Some(format_bytes_per_sec(speed));
             if let Some(total) = total.filter(|total| *total > 0) {
                 let bounded = downloaded.min(total);
@@ -360,6 +445,10 @@ pub async fn stream_to_file(
         return Err(format!("Could not finish file: {error}"));
     }
     drop(file);
+    if let Err(error) = validate_downloaded_file(&temp).await {
+        let _ = tokio::fs::remove_file(&temp).await;
+        return Err(error);
+    }
     let published = publish_without_overwrite(&temp, requested).await;
     if published.is_err() {
         let _ = tokio::fs::remove_file(&temp).await;
@@ -575,6 +664,7 @@ async fn ytdlp_download_attempt(
     if !is_safe_download_filename(file_name) {
         return Err("yt-dlp returned an unsafe executable filename.".to_string());
     }
+    validate_downloaded_file(&final_path).await?;
     Ok(final_path)
 }
 
@@ -633,6 +723,251 @@ pub async fn ytdlp_download(
     }
 }
 
+fn files_below(root: &Path) -> Result<Vec<PathBuf>, String> {
+    let canonical_root = std::fs::canonicalize(root)
+        .map_err(|error| format!("Could not inspect gallery output: {error}"))?;
+    let mut directories = vec![canonical_root.clone()];
+    let mut files = Vec::new();
+    while let Some(directory) = directories.pop() {
+        let entries = std::fs::read_dir(&directory)
+            .map_err(|error| format!("Could not inspect gallery output: {error}"))?;
+        for entry in entries {
+            let entry =
+                entry.map_err(|error| format!("Could not inspect gallery output: {error}"))?;
+            let metadata = entry
+                .file_type()
+                .map_err(|error| format!("Could not inspect gallery output: {error}"))?;
+            if metadata.is_symlink() {
+                continue;
+            }
+            let path = entry.path();
+            if metadata.is_dir() {
+                directories.push(path);
+            } else if metadata.is_file() {
+                let canonical = std::fs::canonicalize(&path)
+                    .map_err(|error| format!("Could not inspect gallery output: {error}"))?;
+                if canonical.starts_with(&canonical_root)
+                    && !canonical
+                        .extension()
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("part"))
+                {
+                    files.push(canonical);
+                }
+            }
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+async fn gallery_dl_download(
+    sink: JobSink<'_>,
+    id: &str,
+    request: &DownloadRequest,
+    engine_tools: &EngineTools,
+    cookie_source: Option<&CookieSource>,
+    cancel: &AtomicBool,
+) -> Result<PathBuf, String> {
+    if !gallery_supports_mode(&request.mode) {
+        return Err("gallery-dl does not extract audio tracks.".to_string());
+    }
+    let Some(tool_path) = engine_tools.gallery_dl_path.as_ref() else {
+        return Err("gallery-dl could not be installed for this platform.".to_string());
+    };
+
+    let staging =
+        Path::new(&request.output_dir).join(format!(".mediafilez-gallery-{}", Uuid::new_v4()));
+    tokio::fs::create_dir(&staging)
+        .await
+        .map_err(|error| format!("Could not create gallery staging folder: {error}"))?;
+    let args = build_gallery_dl_args(
+        &request.url,
+        &staging.to_string_lossy(),
+        request.mode.clone(),
+        cookie_source,
+    );
+
+    let mut command = tokio::process::Command::new(tool_path);
+    command
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    {
+        command.creation_flags(0x0800_0000);
+    }
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            let _ = tokio::fs::remove_dir_all(&staging).await;
+            return Err(format!("Could not start gallery-dl: {error}"));
+        }
+    };
+    let stdout = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => {
+            terminate_process_tree(&mut child).await;
+            let _ = tokio::fs::remove_dir_all(&staging).await;
+            return Err("gallery-dl produced no output.".to_string());
+        }
+    };
+    let stderr = child.stderr.take();
+    let stderr_task = tokio::spawn(async move {
+        let mut lines = VecDeque::with_capacity(MAX_STDERR_LINES);
+        if let Some(stderr) = stderr {
+            let mut reader = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = reader.next_line().await {
+                if !line.trim().is_empty() {
+                    if lines.len() == MAX_STDERR_LINES {
+                        lines.pop_front();
+                    }
+                    lines.push_back(line);
+                }
+            }
+        }
+        lines
+    });
+
+    let read_result: Result<(), String> = async {
+        let mut downloaded = 0_u32;
+        let mut reader = BufReader::new(stdout).lines();
+        loop {
+            let line = tokio::select! {
+                line = reader.next_line() => line.map_err(|error| format!("gallery-dl output error: {error}"))?,
+                _ = tokio::time::sleep(std::time::Duration::from_millis(300)) => {
+                    check_cancel(cancel).map_err(|_| "cancelled".to_string())?;
+                    continue;
+                }
+            };
+            let Some(line) = line else { break };
+            if !line.trim().is_empty() {
+                downloaded += 1;
+                let mut update = JobUpdate::new(id, "downloading");
+                update.provider = Some(ProviderKind::GalleryDl);
+                update.detail = Some(format!(
+                    "Saved {downloaded} gallery item{}",
+                    if downloaded == 1 { "" } else { "s" }
+                ));
+                sink(update);
+            }
+        }
+        Ok(())
+    }
+    .await;
+    if let Err(error) = read_result {
+        terminate_process_tree(&mut child).await;
+        let _ = stderr_task.await;
+        let _ = tokio::fs::remove_dir_all(&staging).await;
+        return Err(error);
+    }
+
+    let status = match child.wait().await {
+        Ok(status) => status,
+        Err(error) => {
+            let _ = stderr_task.await;
+            let _ = tokio::fs::remove_dir_all(&staging).await;
+            return Err(format!("gallery-dl crashed: {error}"));
+        }
+    };
+    let stderr_lines = stderr_task.await.unwrap_or_default();
+    if !status.success() {
+        let reason = stderr_lines
+            .iter()
+            .rev()
+            .find(|line| line.contains("error") || line.contains("unsupported"))
+            .or_else(|| stderr_lines.back())
+            .cloned()
+            .unwrap_or_else(|| "gallery-dl could not process this link.".to_string());
+        let _ = tokio::fs::remove_dir_all(&staging).await;
+        return Err(reason);
+    }
+
+    let publish_result: Result<PathBuf, String> = async {
+        let staged_files = files_below(&staging)?;
+        if staged_files.is_empty() {
+            return Err("gallery-dl finished without a media file.".to_string());
+        }
+        let mut validated = Vec::with_capacity(staged_files.len());
+        for staged in staged_files {
+            validate_downloaded_file(&staged).await?;
+            let file_name = staged
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(str::to_owned)
+                .ok_or_else(|| "gallery-dl returned an invalid filename.".to_string())?;
+            if !is_safe_download_filename(&file_name) {
+                return Err("gallery-dl returned an unsafe executable filename.".to_string());
+            }
+            validated.push((staged, file_name));
+        }
+
+        let mut published = Vec::with_capacity(validated.len());
+        for (staged, file_name) in validated {
+            let target = Path::new(&request.output_dir).join(file_name);
+            match publish_without_overwrite(&staged, target).await {
+                Ok(path) => published.push(path),
+                Err(error) => {
+                    for path in &published {
+                        let _ = tokio::fs::remove_file(path).await;
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        Ok(published.remove(0))
+    }
+    .await;
+    let _ = tokio::fs::remove_dir_all(&staging).await;
+    publish_result
+}
+
+fn is_instagram_media_host(host: &str) -> bool {
+    host == "cdninstagram.com"
+        || host.ends_with(".cdninstagram.com")
+        || host == "fbcdn.net"
+        || host.ends_with(".fbcdn.net")
+}
+
+async fn instagram_proxy_download(
+    sink: JobSink<'_>,
+    id: &str,
+    request: &DownloadRequest,
+    cancel: &AtomicBool,
+) -> Result<PathBuf, String> {
+    let proxy_url = instagram_proxy_url(&request.url)
+        .ok_or_else(|| "This is not a supported public Instagram post URL.".to_string())?;
+    let response = secure_get(
+        &proxy_url,
+        "Discordbot/2.0",
+        std::time::Duration::from_secs(15),
+    )
+    .await?
+    .error_for_status()
+    .map_err(|error| format!("Instagram embed resolver rejected the link: {error}"))?;
+    let media_url = response.url().clone();
+    let host = media_url
+        .host_str()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !is_instagram_media_host(&host) {
+        return Err("Instagram embed resolver did not return an Instagram media file.".to_string());
+    }
+    drop(response);
+    stream_to_file(
+        sink,
+        id,
+        StreamTarget {
+            provider: ProviderKind::InstagramProxy,
+            mode: &request.mode,
+            url: media_url.as_str(),
+            output_dir: &request.output_dir,
+            file_name_hint: None,
+        },
+        cancel,
+    )
+    .await
+}
+
 fn is_forbidden_error(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
     lower.contains("http error 403") || lower.contains("403: forbidden")
@@ -684,7 +1019,25 @@ fn friendly_failure(failures: &[String], settings: &AppSettings) -> (String, Opt
         );
     }
 
-    (combined, None)
+    let details = failures
+        .iter()
+        .rev()
+        .take(4)
+        .map(|failure| {
+            let mut detail: String = failure.chars().take(MAX_PROVIDER_ERROR_CHARS).collect();
+            if failure.chars().count() > MAX_PROVIDER_ERROR_CHARS {
+                detail.push('…');
+            }
+            detail
+        })
+        .collect::<Vec<_>>()
+        .join(" · ");
+    (
+        format!(
+            "All compatible engines were tried, but none returned valid media. {details} Repair the engines or add a signed-in browser session, then retry."
+        ),
+        Some("provider-chain-exhausted".to_string()),
+    )
 }
 
 /// Calls one Cobalt-compatible endpoint and streams the file it resolves.
@@ -702,7 +1055,6 @@ async fn cobalt_fetch(
     endpoint: CobaltEndpoint<'_>,
     cancel: &AtomicBool,
 ) -> Result<PathBuf, String> {
-    validate_api_endpoint(endpoint.base_url)?;
     let payload = build_cobalt_request(
         &request.url,
         request.mode.clone(),
@@ -710,37 +1062,28 @@ async fn cobalt_fetch(
         Some(request.audio_bitrate.as_str()),
     );
 
-    let client = reqwest::Client::builder()
-        .user_agent("rsdownit")
-        .redirect(secure_redirect_policy())
-        .timeout(std::time::Duration::from_secs(
-            endpoint.timeout_seconds.max(5),
-        ))
-        .build()
-        .map_err(|error| format!("HTTP client error: {error}"))?;
-
-    let mut http_request = client
-        .post(endpoint.base_url)
-        .header("Accept", "application/json")
-        .json(&payload);
-    if let Some(header_value) = endpoint.auth_header {
-        http_request = http_request.header("Authorization", header_value);
-    }
-
-    let response = http_request
-        .send()
-        .await
-        .map_err(|error| format!("API request failed: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("API rejected the request: {error}"))?;
+    let response = secure_post_json(
+        endpoint.base_url,
+        APP_USER_AGENT,
+        std::time::Duration::from_secs(endpoint.timeout_seconds.max(5)),
+        endpoint.auth_header.as_deref(),
+        &payload,
+    )
+    .await?
+    .error_for_status()
+    .map_err(|error| format!("API rejected the request: {error}"))?;
     let body = read_response_limited(response, MAX_API_RESPONSE_BYTES, "API response").await?;
     let response: CobaltResponse = serde_json::from_slice(&body)
         .map_err(|error| format!("API returned an unexpected response: {error}"))?;
 
     let media_url = if response.is_downloadable() {
         response.url.clone().unwrap_or_default()
-    } else if let Some(first) = response.picker.first() {
-        first.url.clone()
+    } else if let Some(item) = response.picker.iter().find(|item| match request.mode {
+        DownloadMode::Image => matches!(item.r#type.as_str(), "photo" | "image" | "gif"),
+        DownloadMode::Video | DownloadMode::MutedVideo => item.r#type == "video",
+        DownloadMode::Audio => true,
+    }) {
+        item.url.clone()
     } else {
         let code = response
             .error
@@ -756,10 +1099,13 @@ async fn cobalt_fetch(
     stream_to_file(
         sink,
         id,
-        endpoint.provider,
-        &media_url,
-        &request.output_dir,
-        response.filename.clone(),
+        StreamTarget {
+            provider: endpoint.provider,
+            mode: &request.mode,
+            url: &media_url,
+            output_dir: &request.output_dir,
+            file_name_hint: response.filename.clone(),
+        },
         cancel,
     )
     .await
@@ -774,26 +1120,47 @@ async fn cobalt_download(
     cancel: &AtomicBool,
 ) -> Result<PathBuf, String> {
     let api = &settings.api_provider;
-    let base_url = api.base_url.trim().trim_end_matches('/').to_string();
-    if !api.enabled || base_url.is_empty() {
+    let endpoints = cobalt_endpoints(&api.base_url);
+    if !api.enabled || endpoints.is_empty() {
         return Err("No API endpoint configured.".to_string());
     }
 
     let auth_header = cobalt_authorization(api);
-
-    cobalt_fetch(
-        sink,
-        id,
-        request,
-        CobaltEndpoint {
-            provider: ProviderKind::ConfiguredApi,
-            base_url: &base_url,
-            auth_header,
-            timeout_seconds: api.timeout_seconds,
-        },
-        cancel,
-    )
-    .await
+    let mut failures = Vec::new();
+    for base_url in endpoints.iter().take(8) {
+        if cancel.load(Ordering::SeqCst) {
+            return Err("cancelled".to_string());
+        }
+        let mut update = JobUpdate::new(id, "probing");
+        update.provider = Some(ProviderKind::ConfiguredApi);
+        update.detail = Some(format!(
+            "Trying Cobalt {}",
+            base_url.trim_start_matches("https://")
+        ));
+        sink(update);
+        match cobalt_fetch(
+            sink,
+            id,
+            request,
+            CobaltEndpoint {
+                provider: ProviderKind::ConfiguredApi,
+                base_url,
+                auth_header: auth_header.clone(),
+                timeout_seconds: api.timeout_seconds,
+            },
+            cancel,
+        )
+        .await
+        {
+            Ok(path) => return Ok(path),
+            Err(error) if error == "cancelled" => return Err(error),
+            Err(error) => failures.push(error),
+        }
+    }
+    Err(format!(
+        "Configured Cobalt endpoints failed: {}",
+        failures.join(" | ")
+    ))
 }
 
 fn cobalt_authorization(settings: &ApiProviderSettings) -> Option<String> {
@@ -814,18 +1181,15 @@ async fn public_instances() -> Vec<String> {
     }
 
     let fetched: Option<Vec<String>> = async {
-        let client = reqwest::Client::builder()
-            .user_agent("rsdownit (github.com/RlxChap2/rsdownit)")
-            .timeout(std::time::Duration::from_secs(8))
-            .build()
-            .ok()?;
-        let response = client
-            .get(INSTANCE_DIRECTORY_URL)
-            .send()
-            .await
-            .ok()?
-            .error_for_status()
-            .ok()?;
+        let response = secure_get(
+            INSTANCE_DIRECTORY_URL,
+            DIRECTORY_USER_AGENT,
+            std::time::Duration::from_secs(8),
+        )
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?;
         let body = read_response_limited(response, MAX_API_RESPONSE_BYTES, "instance directory")
             .await
             .ok()?;
@@ -885,6 +1249,13 @@ async fn public_api_download(
     Err(last_error)
 }
 
+async fn validate_html_media_target(url: &str) -> Result<(), String> {
+    validate_remote_target(url)
+        .await
+        .map(|_| ())
+        .map_err(|error| format!("The page exposed an unsafe media URL: {error}"))
+}
+
 /// Fetches the page HTML and downloads the first direct media link found.
 async fn html_probe_download(
     sink: JobSink<'_>,
@@ -896,7 +1267,7 @@ async fn html_probe_download(
 ) -> Result<PathBuf, String> {
     let response = secure_get(
         &request.url,
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) rsdownit",
+        BROWSER_USER_AGENT,
         std::time::Duration::from_secs(20),
     )
     .await
@@ -907,9 +1278,16 @@ async fn html_probe_download(
     let html = String::from_utf8_lossy(&html);
 
     let links = extract_media_links_from_html(&request.url, &html);
-    let Some(media_url) = links.first() else {
-        return Err("No media links found in the page.".to_string());
+    let media_url = links.iter().find(|url| match request.mode {
+        DownloadMode::Image => has_image_extension(url),
+        DownloadMode::Video => !has_image_extension(url) && !has_audio_extension(url),
+        DownloadMode::Audio | DownloadMode::MutedVideo => false,
+    });
+    let Some(media_url) = media_url else {
+        return Err("The page did not expose media matching the selected format.".to_string());
     };
+
+    validate_html_media_target(media_url).await?;
 
     if is_stream_manifest_url(media_url) {
         let mut manifest_request = request.clone();
@@ -929,10 +1307,13 @@ async fn html_probe_download(
         stream_to_file(
             sink,
             id,
-            ProviderKind::HtmlProbe,
-            media_url,
-            &request.output_dir,
-            None,
+            StreamTarget {
+                provider: ProviderKind::HtmlProbe,
+                mode: &request.mode,
+                url: media_url,
+                output_dir: &request.output_dir,
+                file_name_hint: None,
+            },
             cancel,
         )
         .await
@@ -949,17 +1330,47 @@ fn has_audio_extension(url: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn has_image_extension(url: &str) -> bool {
+    let image = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp"];
+    url::Url::parse(url)
+        .map(|parsed| {
+            let path = parsed.path().to_ascii_lowercase();
+            image.iter().any(|extension| path.ends_with(extension))
+        })
+        .unwrap_or(false)
+}
+
+fn is_gallery_focused_url(url: &str) -> bool {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_ascii_lowercase))
+        .is_some_and(|host| {
+            host == "pinterest.com"
+                || host.ends_with(".pinterest.com")
+                || host == "pin.it"
+                || host == "instagram.com"
+                || host.ends_with(".instagram.com")
+        })
+}
+
 fn provider_chain(request: &DownloadRequest, settings: &AppSettings) -> Vec<ProviderKind> {
-    let wants_audio = request.mode == DownloadMode::Audio;
     // A direct file is only a valid fast path when it already matches the
     // requested mode; extracting audio from a raw file needs yt-dlp/FFmpeg.
     let direct_ok = is_direct_media_url(&request.url)
         && !is_stream_manifest_url(&request.url)
-        && (!wants_audio || has_audio_extension(&request.url));
+        && match request.mode {
+            DownloadMode::Audio => has_audio_extension(&request.url),
+            DownloadMode::Image => has_image_extension(&request.url),
+            DownloadMode::Video => !has_audio_extension(&request.url),
+            DownloadMode::MutedVideo => false,
+        };
 
     let mut chain = Vec::new();
     if direct_ok {
         chain.push(ProviderKind::Direct);
+    }
+    if request.mode == DownloadMode::Image && is_gallery_focused_url(&request.url) {
+        chain.push(ProviderKind::GalleryDl);
     }
     chain.push(ProviderKind::YtDlp);
     let api = &settings.api_provider;
@@ -969,7 +1380,16 @@ fn provider_chain(request: &DownloadRequest, settings: &AppSettings) -> Vec<Prov
     if settings.community_fallback {
         chain.push(ProviderKind::PublicApi);
     }
-    if !wants_audio {
+    if gallery_supports_mode(&request.mode) && !chain.contains(&ProviderKind::GalleryDl) {
+        chain.push(ProviderKind::GalleryDl);
+    }
+    if settings.instagram_proxy_fallback
+        && matches!(request.mode, DownloadMode::Video | DownloadMode::Image)
+        && instagram_proxy_url(&request.url).is_some()
+    {
+        chain.push(ProviderKind::InstagramProxy);
+    }
+    if matches!(request.mode, DownloadMode::Video | DownloadMode::Image) {
         chain.push(ProviderKind::HtmlProbe);
     }
     chain
@@ -1003,10 +1423,13 @@ pub async fn run_chain(
                 stream_to_file(
                     sink,
                     id,
-                    ProviderKind::Direct,
-                    &request.url,
-                    &request.output_dir,
-                    None,
+                    StreamTarget {
+                        provider: ProviderKind::Direct,
+                        mode: &request.mode,
+                        url: &request.url,
+                        output_dir: &request.output_dir,
+                        file_name_hint: None,
+                    },
                     cancel,
                 )
                 .await
@@ -1027,6 +1450,21 @@ pub async fn run_chain(
                     cancel,
                 )
                 .await
+            }
+            ProviderKind::GalleryDl => {
+                let cookie_source = settings.cookie_source();
+                gallery_dl_download(
+                    sink,
+                    id,
+                    request,
+                    engine_tools,
+                    cookie_source.as_ref(),
+                    cancel,
+                )
+                .await
+            }
+            ProviderKind::InstagramProxy => {
+                instagram_proxy_download(sink, id, request, cancel).await
             }
             ProviderKind::HtmlProbe => {
                 html_probe_download(sink, id, request, engine_tools, settings, cancel).await
@@ -1050,7 +1488,7 @@ pub async fn run_chain(
                 return;
             }
             Err(error) => {
-                failures.push(format!("{provider:?}: {error}"));
+                failures.push(format!("{}: {error}", provider_name(provider)));
                 let mut update = JobUpdate::new(id, "probing");
                 update.detail = Some("Trying the next provider".to_string());
                 sink(update);
@@ -1063,6 +1501,18 @@ pub async fn run_chain(
     update.error = Some(message);
     update.error_code = error_code;
     sink(update);
+}
+
+fn provider_name(provider: ProviderKind) -> &'static str {
+    match provider {
+        ProviderKind::Direct => "Direct media",
+        ProviderKind::ConfiguredApi => "Cobalt pool",
+        ProviderKind::PublicApi => "Community Cobalt",
+        ProviderKind::YtDlp => "yt-dlp",
+        ProviderKind::GalleryDl => "gallery-dl",
+        ProviderKind::InstagramProxy => "Instagram embed fallback",
+        ProviderKind::HtmlProbe => "Page media scan",
+    }
 }
 
 /// Tauri adapter: resolves tools, wires events, and runs the chain.
@@ -1107,10 +1557,19 @@ pub async fn run_job<R: Runtime>(
     }
 
     let yt_dlp = tools::locate_tool(&app, "yt-dlp");
+    let mut gallery_dl = tools::locate_tool(&app, "gallery-dl");
+    if provider_chain(&request, &settings).contains(&ProviderKind::GalleryDl)
+        && !gallery_dl.available
+    {
+        if let Ok(installed) = tools::ensure_gallery_dl_tool(&app).await {
+            gallery_dl = installed;
+        }
+    }
     let deno = tools::locate_tool(&app, "deno");
     let ffmpeg = tools::locate_tool(&app, "ffmpeg");
     let engine_tools = EngineTools {
         yt_dlp_path: yt_dlp.path,
+        gallery_dl_path: gallery_dl.path,
         deno_path: deno.managed.then_some(deno.path).flatten(),
         ffmpeg_dir: match (ffmpeg.managed, ffmpeg.path) {
             (true, Some(path)) => Path::new(&path)
@@ -1206,8 +1665,17 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejects_private_media_urls_extracted_from_html() {
+        let error = validate_html_media_target("http://127.0.0.1/private.m3u8")
+            .await
+            .expect_err("HTML fallback must reject loopback manifests");
+        assert!(error.contains("unsafe media URL"));
+    }
+
+    #[tokio::test]
     async fn publishes_without_replacing_an_existing_download() {
-        let directory = std::env::temp_dir().join(format!("rsdownit-test-{}", Uuid::new_v4()));
+        let directory =
+            std::env::temp_dir().join(format!("mediafilez-desktop-test-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&directory).expect("creates test directory");
         let requested = directory.join("video.mp4");
         let temp = directory.join("video.part");
@@ -1249,6 +1717,7 @@ mod tests {
             vec![
                 ProviderKind::Direct,
                 ProviderKind::YtDlp,
+                ProviderKind::GalleryDl,
                 ProviderKind::HtmlProbe
             ]
         );
@@ -1256,7 +1725,11 @@ mod tests {
         request.url = "https://cdn.example.com/master.m3u8".to_string();
         assert_eq!(
             provider_chain(&request, &settings),
-            vec![ProviderKind::YtDlp, ProviderKind::HtmlProbe]
+            vec![
+                ProviderKind::YtDlp,
+                ProviderKind::GalleryDl,
+                ProviderKind::HtmlProbe
+            ]
         );
 
         let with_fallback = AppSettings {
@@ -1264,5 +1737,48 @@ mod tests {
             ..AppSettings::default()
         };
         assert!(provider_chain(&request, &with_fallback).contains(&ProviderKind::PublicApi));
+
+        request.mode = DownloadMode::Image;
+        request.url = "https://www.pinterest.com/pin/123/".to_string();
+        assert_eq!(
+            provider_chain(&request, &settings),
+            vec![
+                ProviderKind::GalleryDl,
+                ProviderKind::YtDlp,
+                ProviderKind::HtmlProbe
+            ]
+        );
+
+        request.url = "https://www.instagram.com/reels/DcV3RyRz0sq/".to_string();
+        let with_instagram_fallback = AppSettings {
+            instagram_proxy_fallback: true,
+            ..AppSettings::default()
+        };
+        assert!(provider_chain(&request, &with_instagram_fallback)
+            .contains(&ProviderKind::InstagramProxy));
+    }
+
+    #[test]
+    fn rejects_provider_media_that_does_not_match_the_selected_mode() {
+        assert!(media_type_matches_mode(
+            "image/jpeg",
+            "https://cdn.example/item",
+            &DownloadMode::Image
+        ));
+        assert!(!media_type_matches_mode(
+            "video/mp4",
+            "https://cdn.example/item",
+            &DownloadMode::Image
+        ));
+        assert!(!media_type_matches_mode(
+            "application/octet-stream",
+            "https://cdn.example/audio.m4a",
+            &DownloadMode::Video
+        ));
+        assert!(media_type_matches_mode(
+            "application/octet-stream",
+            "https://cdn.example/item",
+            &DownloadMode::Video
+        ));
     }
 }

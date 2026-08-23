@@ -1,4 +1,4 @@
-export type DownloadMode = "video" | "audio" | "muted-video";
+export type DownloadMode = "video" | "image" | "audio" | "muted-video";
 
 export type AudioFormat = "best" | "mp3" | "m4a" | "opus" | "wav";
 
@@ -13,7 +13,14 @@ export type VideoQuality =
   | "480p"
   | "360p";
 
-export type ProviderKind = "direct" | "api" | "public-api" | "yt-dlp" | "html";
+export type ProviderKind =
+  | "direct"
+  | "api"
+  | "public-api"
+  | "yt-dlp"
+  | "gallery-dl"
+  | "instagram-proxy"
+  | "html";
 
 export type JobStatus =
   | "queued"
@@ -81,6 +88,7 @@ export type ToolStatus = {
 
 export type ToolsReport = {
   ytDlp: ToolStatus;
+  galleryDl: ToolStatus;
   deno: ToolStatus;
   ffmpeg: ToolStatus;
   ready: boolean;
@@ -95,6 +103,7 @@ export type ToolUpdateStatus = {
 
 export type ToolUpdatesReport = {
   ytDlp: ToolUpdateStatus;
+  galleryDl: ToolUpdateStatus;
   deno: ToolUpdateStatus;
   ffmpeg: ToolUpdateStatus;
   updatesAvailable: boolean;
@@ -125,6 +134,7 @@ export type AppSettings = {
   ffmpegPath: string;
   apiProvider: ApiProviderSettings;
   communityFallback: boolean;
+  instagramProxyFallback: boolean;
 };
 
 export type PreflightCheck = {

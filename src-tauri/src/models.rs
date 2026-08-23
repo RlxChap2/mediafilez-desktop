@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "kebab-case")]
 pub enum DownloadMode {
     Video,
+    Image,
     Audio,
     MutedVideo,
 }
@@ -83,6 +84,10 @@ pub enum ProviderKind {
     PublicApi,
     #[serde(rename = "yt-dlp")]
     YtDlp,
+    #[serde(rename = "gallery-dl")]
+    GalleryDl,
+    #[serde(rename = "instagram-proxy")]
+    InstagramProxy,
     #[serde(rename = "html")]
     HtmlProbe,
 }

@@ -10,6 +10,8 @@ export const PROVIDER_ORDER: ProviderKind[] = [
   "direct",
   "api",
   "yt-dlp",
+  "gallery-dl",
+  "instagram-proxy",
   "public-api",
   "html",
 ];
@@ -62,6 +64,10 @@ export function getProviderLabel(provider: ProviderKind) {
       return "Community server";
     case "yt-dlp":
       return "yt-dlp";
+    case "gallery-dl":
+      return "gallery-dl";
+    case "instagram-proxy":
+      return "Instagram embed fallback";
     case "html":
       return "HTML media scan";
   }

@@ -30,8 +30,10 @@ import { useTheme } from "../lib/use-theme";
 import { isProbablyUrl } from "../lib/utils";
 import "../styles/app.css";
 
-const REPO_URL = "https://github.com/RlxChap2/rsdownit";
-const HISTORY_KEY = "rsdownit-history-v1";
+const REPO_URL = "https://github.com/RlxChap2/mediafilez-desktop";
+const HISTORY_KEY = "mediafilez-desktop-history-v1";
+const AUTOSTART_KEY = "mediafilez-desktop-autostart";
+const ADVANCED_KEY = "mediafilez-desktop-advanced";
 
 const initialApiProvider: ApiProviderSettings = {
   enabled: false,
@@ -82,6 +84,7 @@ function App() {
   const [client, setClient] = useState<TauriClient>(browserFallbackClient);
   const [url, setUrl] = useState("");
   const [mode, setMode] = useState<DownloadMode>("video");
+  const [removeAudio, setRemoveAudio] = useState(false);
   const [videoQuality, setVideoQuality] = useState<VideoQuality>("best");
   const [audioFormat, setAudioFormat] = useState<AudioFormat>("best");
   const [audioBitrate, setAudioBitrate] = useState<AudioBitrate>("best");
@@ -89,6 +92,7 @@ function App() {
   const [jobs, setJobs] = useState<JobItem[]>(readHistory);
   const [apiProvider, setApiProvider] = useState(initialApiProvider);
   const [communityFallback, setCommunityFallback] = useState(false);
+  const [instagramProxyFallback, setInstagramProxyFallback] = useState(false);
   const [concurrency, setConcurrency] = useState(2);
   const [cookiesFromBrowser, setCookiesFromBrowser] = useState(false);
   const [cookieBrowser, setCookieBrowser] = useState<
@@ -96,8 +100,8 @@ function App() {
   >("firefox");
   const [cookieBrowserProfile, setCookieBrowserProfile] = useState("");
   const [cookieFile, setCookieFile] = useState("");
-  const [autoStart, setAutoStart] = useState(() => readPref("rsdownit-autostart", false));
-  const [showAdvanced, setShowAdvanced] = useState(() => readPref("rsdownit-advanced", false));
+  const [autoStart, setAutoStart] = useState(() => readPref(AUTOSTART_KEY, false));
+  const [showAdvanced, setShowAdvanced] = useState(() => readPref(ADVANCED_KEY, false));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tools, setTools] = useState<ToolsReport | null>(null);
   const [checkingTools, setCheckingTools] = useState(false);
@@ -163,6 +167,7 @@ function App() {
         const settings = settingsResult.value;
         setApiProvider(settings.apiProvider);
         setCommunityFallback(settings.communityFallback);
+        setInstagramProxyFallback(settings.instagramProxyFallback);
         setConcurrency(settings.concurrency);
         setCookiesFromBrowser(settings.cookiesFromBrowser);
         setCookieBrowser(settings.cookieBrowser);
@@ -218,7 +223,7 @@ function App() {
         toast.error("Enter a complete http or https media link.");
         return;
       }
-      const jobMode = overrides?.mode ?? mode;
+      const jobMode = overrides?.mode ?? (mode === "video" && removeAudio ? "muted-video" : mode);
 
       try {
         const id = await client.startDownload({
@@ -238,7 +243,7 @@ function App() {
         toast.error("Download could not start", { description: String(error) });
       }
     },
-    [client, url, mode, outputFolder, videoQuality, audioFormat, audioBitrate],
+    [client, url, mode, removeAudio, outputFolder, videoQuality, audioFormat, audioBitrate],
   );
 
   async function handlePaste() {
@@ -268,7 +273,7 @@ function App() {
   }
 
   function openAuthenticationSettings() {
-    updatePref("rsdownit-advanced", true, setShowAdvanced);
+    updatePref(ADVANCED_KEY, true, setShowAdvanced);
     setSettingsOpen(true);
   }
 
@@ -294,6 +299,7 @@ function App() {
         ffmpegPath: "",
         apiProvider: { ...apiProvider, enabled: Boolean(apiProvider.baseUrl.trim()) },
         communityFallback,
+        instagramProxyFallback,
       });
       setSettingsOpen(false);
     } catch (error) {
@@ -386,11 +392,16 @@ function App() {
           audioBitrate={audioBitrate}
           outputFolder={outputFolder}
           showAdvanced={showAdvanced}
+          removeAudio={removeAudio}
           onUrlChange={setUrl}
-          onModeChange={setMode}
+          onModeChange={(value) => {
+            setMode(value);
+            if (value !== "video") setRemoveAudio(false);
+          }}
           onVideoQualityChange={setVideoQuality}
           onAudioFormatChange={setAudioFormat}
           onAudioBitrateChange={setAudioBitrate}
+          onRemoveAudioChange={setRemoveAudio}
           onPaste={() => void handlePaste()}
           onChooseFolder={() => void chooseFolder()}
           onDownload={() => void startDownload()}
@@ -418,7 +429,7 @@ function App() {
       </main>
 
       <footer className="app-footer">
-        <span>rsdownit {version}</span>
+        <span>MediaFilez Desktop {version}</span>
         <span>Local first · no telemetry · MIT</span>
       </footer>
 
@@ -428,6 +439,7 @@ function App() {
         autoStart={autoStart}
         showAdvanced={showAdvanced}
         communityFallback={communityFallback}
+        instagramProxyFallback={instagramProxyFallback}
         concurrency={concurrency}
         cookiesFromBrowser={cookiesFromBrowser}
         cookieBrowser={cookieBrowser}
@@ -439,9 +451,10 @@ function App() {
         checkingUpdates={checkingUpdates}
         onClose={() => setSettingsOpen(false)}
         onChooseFolder={() => void chooseFolder()}
-        onAutoStartChange={(value) => updatePref("rsdownit-autostart", value, setAutoStart)}
-        onShowAdvancedChange={(value) => updatePref("rsdownit-advanced", value, setShowAdvanced)}
+        onAutoStartChange={(value) => updatePref(AUTOSTART_KEY, value, setAutoStart)}
+        onShowAdvancedChange={(value) => updatePref(ADVANCED_KEY, value, setShowAdvanced)}
         onCommunityFallbackChange={setCommunityFallback}
+        onInstagramProxyFallbackChange={setInstagramProxyFallback}
         onConcurrencyChange={setConcurrency}
         onCookiesFromBrowserChange={(value) => {
           setCookiesFromBrowser(value);

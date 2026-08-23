@@ -7,7 +7,7 @@
 
 use std::sync::atomic::AtomicBool;
 
-use crate::downloader::{stream_to_file, ytdlp_download, EngineTools, JobUpdate};
+use crate::downloader::{stream_to_file, ytdlp_download, EngineTools, JobUpdate, StreamTarget};
 use crate::models::{AudioFormat, DownloadMode, DownloadRequest, ProviderKind, VideoQuality};
 use crate::tools;
 
@@ -15,7 +15,7 @@ fn noop_job_sink(_update: JobUpdate) {}
 
 fn temp_dir(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir()
-        .join("rsdownit-engine-tests")
+        .join("mediafilez-desktop-engine-tests")
         .join(name);
     std::fs::create_dir_all(&dir).expect("temp dir");
     dir
@@ -32,10 +32,13 @@ fn direct_stream_download_works() {
         .block_on(stream_to_file(
             &noop_job_sink,
             "test-job",
-            ProviderKind::Direct,
-            "https://raw.githubusercontent.com/yt-dlp/yt-dlp/master/README.md",
-            &out_dir.to_string_lossy(),
-            None,
+            StreamTarget {
+                provider: ProviderKind::Direct,
+                mode: &DownloadMode::Video,
+                url: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+                output_dir: &out_dir.to_string_lossy(),
+                file_name_hint: None,
+            },
             &cancel,
         ))
         .expect("download succeeds");
@@ -80,6 +83,7 @@ fn downloads_audio_with_managed_ytdlp() {
 
     let engine_tools = EngineTools {
         yt_dlp_path: report.yt_dlp.path,
+        gallery_dl_path: report.gallery_dl.path,
         deno_path: report.deno.managed.then_some(report.deno.path).flatten(),
         ffmpeg_dir: None,
     };

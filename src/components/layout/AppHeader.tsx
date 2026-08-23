@@ -1,6 +1,5 @@
 import { Code2, Moon, Settings, ShieldCheck, Sun } from "lucide-react";
 
-import logoMark from "../../assets/logo-mark.svg";
 import type { ToolsReport } from "../../lib/types";
 import type { Theme } from "../../lib/use-theme";
 
@@ -34,10 +33,10 @@ export function AppHeader({
   return (
     <header className="app-header">
       <div className="brand-lockup">
-        <img src={logoMark} alt="" className="brand-mark" width="52" height="52" draggable={false} />
+        <img src="/logo.svg" alt="" className="brand-mark" width="52" height="52" draggable={false} />
         <div>
-          <h1>rsdownit</h1>
-          <p>Universal downloader</p>
+          <h1>MediaFilez</h1>
+          <p>Desktop downloader</p>
         </div>
       </div>
 

@@ -1,4 +1,4 @@
-//! Finds and provisions yt-dlp, Deno, and FFmpeg with publisher checksum verification.
+//! Finds and provisions yt-dlp, gallery-dl, Deno, and FFmpeg with publisher checksums.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -12,6 +12,7 @@ use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 pub const SETUP_EVENT: &str = "setup://progress";
+const APP_USER_AGENT: &str = concat!("MediaFilez Desktop/", env!("CARGO_PKG_VERSION"));
 
 const YTDLP_WINDOWS_URL: &str =
     "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
@@ -21,6 +22,8 @@ const YTDLP_LINUX_URL: &str =
     "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux";
 const YTDLP_CHECKSUMS_URL: &str =
     "https://github.com/yt-dlp/yt-dlp/releases/latest/download/SHA2-256SUMS";
+const GALLERY_DL_RELEASE_API: &str =
+    "https://codeberg.org/api/v1/repos/mikf/gallery-dl/releases/latest";
 const DENO_WINDOWS_X64_ASSET: &str = "deno-x86_64-pc-windows-msvc.zip";
 const DENO_WINDOWS_ARM64_ASSET: &str = "deno-aarch64-pc-windows-msvc.zip";
 const DENO_MACOS_X64_ASSET: &str = "deno-x86_64-apple-darwin.zip";
@@ -52,6 +55,7 @@ pub struct ToolStatus {
 #[serde(rename_all = "camelCase")]
 pub struct ToolsReport {
     pub yt_dlp: ToolStatus,
+    pub gallery_dl: ToolStatus,
     pub deno: ToolStatus,
     pub ffmpeg: ToolStatus,
     pub ready: bool,
@@ -70,6 +74,7 @@ pub struct ToolUpdateStatus {
 #[serde(rename_all = "camelCase")]
 pub struct ToolUpdatesReport {
     pub yt_dlp: ToolUpdateStatus,
+    pub gallery_dl: ToolUpdateStatus,
     pub deno: ToolUpdateStatus,
     pub ffmpeg: ToolUpdateStatus,
     pub updates_available: bool,
@@ -87,6 +92,11 @@ pub struct SetupProgress {
 
 /// Progress callback for provisioning; wired to `setup://progress` in the app.
 pub type SetupSink<'a> = &'a (dyn Fn(SetupProgress) + Send + Sync);
+
+#[derive(serde::Deserialize)]
+struct GalleryRelease {
+    tag_name: String,
+}
 
 fn exe_name(base: &str) -> String {
     if cfg!(windows) {
@@ -128,6 +138,20 @@ fn ffmpeg_release_checksum_path(tools_dir: &Path) -> PathBuf {
 
 fn deno_release_checksum_path(tools_dir: &Path) -> PathBuf {
     tools_dir.join("deno-release.sha256")
+}
+
+fn gallery_release_checksum_path(tools_dir: &Path) -> PathBuf {
+    tools_dir.join("gallery-dl-release.sha256")
+}
+
+fn gallery_release_asset() -> Option<&'static str> {
+    if cfg!(all(windows, target_arch = "x86")) {
+        Some("gallery-dl_x86.exe")
+    } else if cfg!(windows) {
+        Some("gallery-dl.exe")
+    } else {
+        None
+    }
 }
 
 fn deno_release_asset() -> Option<&'static str> {
@@ -254,7 +278,7 @@ pub fn locate_tool_in(tools_dir: Option<&Path>, base_name: &str) -> ToolStatus {
 
 async fn fetch_text(url: &str, label: &str) -> Result<String, String> {
     let response = reqwest::Client::builder()
-        .user_agent("rsdownit")
+        .user_agent(APP_USER_AGENT)
         .connect_timeout(Duration::from_secs(20))
         .timeout(Duration::from_secs(30))
         .build()
@@ -293,6 +317,23 @@ fn checksum_for_asset(checksums: &str, asset_name: &str) -> Option<String> {
     })
 }
 
+async fn gallery_release() -> Result<(String, String, String), String> {
+    let metadata = fetch_text(GALLERY_DL_RELEASE_API, "gallery-dl release metadata").await?;
+    let release: GalleryRelease = serde_json::from_str(&metadata)
+        .map_err(|error| format!("gallery-dl release metadata was invalid: {error}"))?;
+    let asset = gallery_release_asset()
+        .ok_or_else(|| "Managed gallery-dl is not available for this platform.".to_string())?;
+    let base = format!(
+        "https://codeberg.org/mikf/gallery-dl/releases/download/{}",
+        release.tag_name
+    );
+    let checksums = fetch_text(&format!("{base}/SHA256SUMS"), "gallery-dl checksums").await?;
+    let expected = checksum_for_asset(&checksums, asset).ok_or_else(|| {
+        "The gallery-dl release did not publish a checksum for this platform.".to_string()
+    })?;
+    Ok((format!("{base}/{asset}"), asset.to_string(), expected))
+}
+
 fn report(
     sink: SetupSink<'_>,
     tool: &str,
@@ -318,7 +359,7 @@ async fn download_file(
     expected_sha256: &str,
 ) -> Result<(), String> {
     let client = reqwest::Client::builder()
-        .user_agent("rsdownit")
+        .user_agent(APP_USER_AGENT)
         .connect_timeout(Duration::from_secs(20))
         .timeout(TOOL_DOWNLOAD_TIMEOUT)
         .build()
@@ -474,6 +515,40 @@ async fn ensure_yt_dlp(
 
     report(sink, "yt-dlp", "ready", 0, None, "yt-dlp is ready");
     Ok(locate_tool_in(Some(tools_dir), "yt-dlp"))
+}
+
+async fn ensure_gallery_dl(
+    tools_dir: &Path,
+    sink: SetupSink<'_>,
+    refresh_managed: bool,
+) -> Result<ToolStatus, String> {
+    let existing = locate_tool_in(Some(tools_dir), "gallery-dl");
+    if existing.available && (!refresh_managed || !existing.managed) {
+        return Ok(existing);
+    }
+    if gallery_release_asset().is_none() {
+        return Ok(existing);
+    }
+
+    report(
+        sink,
+        "gallery-dl",
+        "verifying",
+        0,
+        None,
+        "Fetching publisher checksum",
+    );
+    let (url, _, expected) = gallery_release().await?;
+    let destination = tools_dir.join(exe_name("gallery-dl"));
+    download_file(sink, "gallery-dl", &url, &destination, &expected).await?;
+    tokio::fs::write(
+        gallery_release_checksum_path(tools_dir),
+        format!("{expected}\n"),
+    )
+    .await
+    .map_err(|error| format!("Could not store gallery-dl release checksum: {error}"))?;
+    report(sink, "gallery-dl", "ready", 0, None, "gallery-dl is ready");
+    Ok(locate_tool_in(Some(tools_dir), "gallery-dl"))
 }
 
 fn extract_deno_from_zip(zip_path: &Path, target_dir: &Path) -> Result<(), String> {
@@ -673,8 +748,7 @@ async fn ensure_ffmpeg(
     }
 
     if !cfg!(windows) {
-        // Cross-platform managed FFmpeg lands with the packaging work; on
-        // macOS/Linux we rely on the system package manager for now.
+        // On macOS and Linux, use FFmpeg installed by the system package manager.
         return Ok(existing);
     }
 
@@ -719,6 +793,12 @@ pub async fn ensure_tools_in(tools_dir: &Path, sink: SetupSink<'_>) -> Result<To
     std::fs::create_dir_all(tools_dir)
         .map_err(|error| format!("Could not create tools dir: {error}"))?;
     let yt_dlp = ensure_yt_dlp(tools_dir, sink, false).await?;
+    let gallery_dl = ensure_gallery_dl(tools_dir, sink, false)
+        .await
+        .unwrap_or_else(|error| {
+            report(sink, "gallery-dl", "error", 0, None, &error);
+            locate_tool_in(Some(tools_dir), "gallery-dl")
+        });
     let deno = ensure_deno(tools_dir, sink, false)
         .await
         .unwrap_or_else(|error| {
@@ -735,6 +815,7 @@ pub async fn ensure_tools_in(tools_dir: &Path, sink: SetupSink<'_>) -> Result<To
     let ready = yt_dlp.available && deno.available;
     Ok(ToolsReport {
         yt_dlp,
+        gallery_dl,
         deno,
         ffmpeg,
         ready,
@@ -748,6 +829,12 @@ pub async fn refresh_tools_in(
     std::fs::create_dir_all(tools_dir)
         .map_err(|error| format!("Could not create tools dir: {error}"))?;
     let yt_dlp = ensure_yt_dlp(tools_dir, sink, true).await?;
+    let gallery_dl = ensure_gallery_dl(tools_dir, sink, true)
+        .await
+        .unwrap_or_else(|error| {
+            report(sink, "gallery-dl", "error", 0, None, &error);
+            locate_tool_in(Some(tools_dir), "gallery-dl")
+        });
     let deno = ensure_deno(tools_dir, sink, true)
         .await
         .unwrap_or_else(|error| {
@@ -763,6 +850,7 @@ pub async fn refresh_tools_in(
     Ok(ToolsReport {
         ready: yt_dlp.available && deno.available,
         yt_dlp,
+        gallery_dl,
         deno,
         ffmpeg,
     })
@@ -770,6 +858,7 @@ pub async fn refresh_tools_in(
 
 pub async fn check_tool_updates_in(tools_dir: &Path) -> Result<ToolUpdatesReport, String> {
     let yt_dlp = locate_tool_in(Some(tools_dir), "yt-dlp");
+    let gallery_dl = locate_tool_in(Some(tools_dir), "gallery-dl");
     let deno = locate_tool_in(Some(tools_dir), "deno");
     let ffmpeg = locate_tool_in(Some(tools_dir), "ffmpeg");
 
@@ -807,6 +896,16 @@ pub async fn check_tool_updates_in(tools_dir: &Path) -> Result<ToolUpdatesReport
         None
     };
 
+    let gallery_update = if gallery_dl.managed && gallery_dl.available {
+        let (_, _, latest) = gallery_release().await?;
+        std::fs::read_to_string(gallery_release_checksum_path(tools_dir))
+            .ok()
+            .and_then(|value| value.split_whitespace().next().map(str::to_owned))
+            .map(|current| !current.eq_ignore_ascii_case(&latest))
+    } else {
+        None
+    };
+
     let ffmpeg_update = if cfg!(windows) && ffmpeg.managed && ffmpeg.available {
         let latest = fetch_text(FFMPEG_WINDOWS_SHA256_URL, "FFmpeg checksum").await?;
         let latest = latest
@@ -823,6 +922,7 @@ pub async fn check_tool_updates_in(tools_dir: &Path) -> Result<ToolUpdatesReport
 
     Ok(ToolUpdatesReport {
         updates_available: yt_update == Some(true)
+            || gallery_update == Some(true)
             || deno_update == Some(true)
             || ffmpeg_update == Some(true),
         yt_dlp: ToolUpdateStatus {
@@ -830,6 +930,12 @@ pub async fn check_tool_updates_in(tools_dir: &Path) -> Result<ToolUpdatesReport
             managed: yt_dlp.managed,
             update_available: yt_update,
             current_version: yt_dlp.version,
+        },
+        gallery_dl: ToolUpdateStatus {
+            name: "gallery-dl".to_string(),
+            managed: gallery_dl.managed,
+            update_available: gallery_update,
+            current_version: gallery_dl.version,
         },
         deno: ToolUpdateStatus {
             name: "Deno".to_string(),
@@ -846,9 +952,7 @@ pub async fn check_tool_updates_in(tools_dir: &Path) -> Result<ToolUpdatesReport
     })
 }
 
-// ---------------------------------------------------------------------------
 // Tauri adapters
-// ---------------------------------------------------------------------------
 
 pub fn tools_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let dir = app
@@ -867,11 +971,13 @@ pub fn locate_tool<R: Runtime>(app: &AppHandle<R>, base_name: &str) -> ToolStatu
 
 pub fn tools_report<R: Runtime>(app: &AppHandle<R>) -> ToolsReport {
     let yt_dlp = locate_tool(app, "yt-dlp");
+    let gallery_dl = locate_tool(app, "gallery-dl");
     let deno = locate_tool(app, "deno");
     let ffmpeg = locate_tool(app, "ffmpeg");
     let ready = yt_dlp.available && deno.available;
     ToolsReport {
         yt_dlp,
+        gallery_dl,
         deno,
         ffmpeg,
         ready,
@@ -894,6 +1000,15 @@ pub async fn refresh_tools<R: Runtime>(app: &AppHandle<R>) -> Result<ToolsReport
         let _ = app.emit(SETUP_EVENT, progress);
     };
     refresh_tools_in(&dir, &sink).await
+}
+
+pub async fn ensure_gallery_dl_tool<R: Runtime>(app: &AppHandle<R>) -> Result<ToolStatus, String> {
+    let _guard = tool_operation_lock().lock().await;
+    let dir = tools_dir(app)?;
+    let sink = |progress: SetupProgress| {
+        let _ = app.emit(SETUP_EVENT, progress);
+    };
+    ensure_gallery_dl(&dir, &sink, false).await
 }
 
 pub async fn check_tool_updates<R: Runtime>(
@@ -928,5 +1043,23 @@ mod tests {
             Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
         );
         assert!(checksum_for_asset(checksums, "missing.exe").is_none());
+    }
+
+    #[tokio::test]
+    #[ignore = "network: downloads the official gallery-dl executable"]
+    async fn provisions_gallery_dl_with_publisher_checksum() {
+        let directory =
+            std::env::temp_dir().join(format!("mediafilez-gallery-tool-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).expect("creates tool test directory");
+
+        let status = ensure_gallery_dl(&directory, &|_progress| {}, false)
+            .await
+            .expect("gallery-dl provision succeeds");
+        assert!(status.available, "gallery-dl is available after provision");
+        if status.managed {
+            assert!(status.verified, "managed gallery-dl passes SHA-256");
+        }
+
+        std::fs::remove_dir_all(&directory).expect("removes tool test directory");
     }
 }

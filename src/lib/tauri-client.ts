@@ -42,7 +42,7 @@ export type TauriClient = {
 };
 
 const FALLBACK_FOLDER = "Downloads";
-const FALLBACK_PICKED_FOLDER = "Downloads\\rsdownit";
+const FALLBACK_PICKED_FOLDER = "Downloads\\MediaFilez";
 const UPDATE_TIMEOUT_MS = 20_000;
 
 const fallbackSettings: AppSettings = {
@@ -61,6 +61,7 @@ const fallbackSettings: AppSettings = {
     timeoutSeconds: 20,
   },
   communityFallback: false,
+  instagramProxyFallback: false,
 };
 
 const fallbackTools: ToolsReport = {
@@ -68,6 +69,15 @@ const fallbackTools: ToolsReport = {
     name: "yt-dlp",
     available: true,
     path: "yt-dlp",
+    managed: true,
+    version: "browser demo",
+    verified: true,
+    sha256: "browser-demo",
+  },
+  galleryDl: {
+    name: "gallery-dl",
+    available: true,
+    path: "gallery-dl",
     managed: true,
     version: "browser demo",
     verified: true,
@@ -97,6 +107,12 @@ const fallbackTools: ToolsReport = {
 const fallbackToolUpdates: ToolUpdatesReport = {
   ytDlp: {
     name: "yt-dlp",
+    managed: true,
+    updateAvailable: false,
+    currentVersion: "browser demo",
+  },
+  galleryDl: {
+    name: "gallery-dl",
     managed: true,
     updateAvailable: false,
     currentVersion: "browser demo",
@@ -173,7 +189,7 @@ function createBrowserClient(): TauriClient {
     async startDownload(request) {
       counter += 1;
       const id = `demo-${counter}`;
-      const isAudio = request.mode === "audio";
+      const extension = request.mode === "audio" ? "m4a" : request.mode === "image" ? "jpg" : "mp4";
       let progress = 0;
 
       setTimeout(() => {
@@ -200,7 +216,7 @@ function createBrowserClient(): TauriClient {
             title: "Demo media",
             provider: "yt-dlp",
             progress: 100,
-            filePath: `${request.outputDir || FALLBACK_FOLDER}\\Demo media.${isAudio ? "m4a" : "mp4"}`,
+            filePath: `${request.outputDir || FALLBACK_FOLDER}\\Demo media.${extension}`,
           });
         }
       }, 90);

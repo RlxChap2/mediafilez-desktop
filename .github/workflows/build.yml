@@ -46,6 +46,8 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+      - run: pnpm exec playwright install chromium
+      - run: pnpm test:smoke
       - run: pnpm build
       - run: pnpm audit --prod
       - name: Rust format
@@ -113,7 +115,7 @@ jobs:
         run: |
           $bundle = @{}
           if ($env:WINDOWS_CERTIFICATE) {
-            $certificatePath = Join-Path $env:RUNNER_TEMP 'rsdownit-signing.pfx'
+            $certificatePath = Join-Path $env:RUNNER_TEMP 'mediafilez-desktop-signing.pfx'
             [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
             $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
             $certificate = Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password
@@ -146,7 +148,7 @@ jobs:
           $artifactDir = Join-Path $env:GITHUB_WORKSPACE 'artifacts'
           New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
           $files = @(
-            Get-Item 'src-tauri/target/release/rsdownit.exe' -ErrorAction SilentlyContinue
+            Get-Item 'src-tauri/target/release/MediaFilez Desktop.exe' -ErrorAction SilentlyContinue
             Get-ChildItem 'src-tauri/target/release/bundle/nsis' -Filter '*.exe' -File -ErrorAction SilentlyContinue
             Get-ChildItem 'src-tauri/target/release/bundle/nsis' -Filter '*.exe.sig' -File -ErrorAction SilentlyContinue
             Get-ChildItem 'src-tauri/target/release/bundle/msi' -Filter '*.msi' -File -ErrorAction SilentlyContinue
@@ -217,7 +219,7 @@ jobs:
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rsdownit-windows-${{ github.sha }}
+          name: mediafilez-desktop-windows-${{ github.sha }}
           path: artifacts/*
           if-no-files-found: error
 
@@ -233,11 +235,11 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $assets --clobber
           } else {
-            gh release create $tag $assets --verify-tag --generate-notes --title "rsdownit $tag"
+            gh release create $tag $assets --verify-tag --generate-notes --title "MediaFilez Desktop $tag"
           }
           if ($LASTEXITCODE -ne 0) { throw "Could not publish release assets for $tag." }
 
-          $marker = '<!-- rsdownit-sha256 -->'
+          $marker = '<!-- mediafilez-desktop-sha256 -->'
           $body = (gh release view $tag --json body --jq .body) -join "`n"
           if ($LASTEXITCODE -ne 0) { throw "Could not read release notes for $tag." }
           $markerIndex = $body.IndexOf($marker)

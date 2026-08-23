@@ -1,8 +1,9 @@
 use scraper::{Html, Selector};
 use url::Url;
 
-const MEDIA_EXTENSIONS: [&str; 11] = [
-    "mp4", "webm", "m3u8", "mpd", "mov", "m4v", "mkv", "m4a", "mp3", "opus", "wav",
+const MEDIA_EXTENSIONS: [&str; 18] = [
+    "mp4", "webm", "m3u8", "mpd", "mov", "m4v", "mkv", "m4a", "mp3", "opus", "wav", "jpg", "jpeg",
+    "png", "webp", "gif", "avif", "bmp",
 ];
 
 pub fn is_direct_media_url(input: &str) -> bool {
@@ -36,8 +37,15 @@ pub fn extract_media_links_from_html(base_url: &str, html: &str) -> Vec<String> 
     let selectors = [
         ("meta[property='og:video']", "content"),
         ("meta[property='og:video:url']", "content"),
+        ("meta[property='og:image']", "content"),
+        ("meta[property='og:image:url']", "content"),
+        ("meta[property='og:audio']", "content"),
+        ("meta[name='twitter:player:stream']", "content"),
+        ("meta[name='twitter:image']", "content"),
         ("video", "src"),
+        ("audio", "src"),
         ("source", "src"),
+        ("img", "src"),
         ("a", "href"),
     ];
     let mut links = Vec::new();

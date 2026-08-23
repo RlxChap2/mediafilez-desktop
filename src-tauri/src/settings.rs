@@ -44,6 +44,8 @@ pub struct AppSettings {
     pub api_provider: ApiProviderSettings,
     /// Third-party community Cobalt servers. Disabled unless the user opts in.
     pub community_fallback: bool,
+    /// Experimental Instagram embed resolver. Never receives cookies or tokens.
+    pub instagram_proxy_fallback: bool,
 }
 
 impl AppSettings {
@@ -87,6 +89,7 @@ impl Default for AppSettings {
                 ProviderKind::Direct,
                 ProviderKind::YtDlp,
                 ProviderKind::ConfiguredApi,
+                ProviderKind::GalleryDl,
                 ProviderKind::HtmlProbe,
             ],
             concurrency: 2,
@@ -97,6 +100,7 @@ impl Default for AppSettings {
             ffmpeg_path: String::new(),
             api_provider: ApiProviderSettings::default(),
             community_fallback: false,
+            instagram_proxy_fallback: false,
         }
     }
 }
@@ -119,12 +123,7 @@ impl AppSettings {
         ) {
             self.api_provider.auth_type = "none".to_string();
         }
-        self.api_provider.base_url = self
-            .api_provider
-            .base_url
-            .trim()
-            .trim_end_matches('/')
-            .to_string();
+        self.api_provider.base_url = cobalt_endpoints(&self.api_provider.base_url).join("\n");
         if self.api_provider.base_url.is_empty() {
             self.api_provider.enabled = false;
         }
@@ -145,6 +144,17 @@ impl AppSettings {
         }
         Some(CookieSource::Browser(browser))
     }
+}
+
+pub fn cobalt_endpoints(value: &str) -> Vec<String> {
+    let mut endpoints = Vec::new();
+    for endpoint in value.lines().flat_map(|line| line.split(',')) {
+        let endpoint = endpoint.trim().trim_end_matches('/');
+        if !endpoint.is_empty() && !endpoints.iter().any(|item| item == endpoint) {
+            endpoints.push(endpoint.to_string());
+        }
+    }
+    endpoints
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -208,6 +218,24 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_a_cobalt_endpoint_pool() {
+        let mut settings = AppSettings {
+            api_provider: ApiProviderSettings {
+                enabled: true,
+                base_url: " https://one.example/\nhttps://two.example, https://one.example "
+                    .to_string(),
+                ..ApiProviderSettings::default()
+            },
+            ..AppSettings::default()
+        };
+        settings.normalize();
+        assert_eq!(
+            settings.api_provider.base_url,
+            "https://one.example\nhttps://two.example"
+        );
+    }
+
+    #[test]
     fn resolves_cookie_file_before_browser_session() {
         let settings = AppSettings {
             cookies_from_browser: true,
@@ -233,8 +261,10 @@ mod tests {
 
     #[test]
     fn validates_netscape_cookie_files() {
-        let path =
-            std::env::temp_dir().join(format!("rsdownit-cookies-{}.txt", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!(
+            "mediafilez-desktop-cookies-{}.txt",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::write(
             &path,
             "# Netscape HTTP Cookie File\n.example.com\tTRUE\t/\tFALSE\t0\ta\tb\n",
@@ -246,8 +276,10 @@ mod tests {
 
     #[test]
     fn never_persists_api_tokens() {
-        let path =
-            std::env::temp_dir().join(format!("rsdownit-settings-{}.json", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!(
+            "mediafilez-desktop-settings-{}.json",
+            uuid::Uuid::new_v4()
+        ));
         let mut settings = AppSettings::default();
         settings.api_provider.token = "session-secret".to_string();
         settings.save(&path).expect("settings save");

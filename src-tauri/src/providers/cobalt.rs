@@ -4,11 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::models::{AudioFormat, DownloadMode};
 
-/// Live directory of open community instances (no auth required).
+/// Legacy community directory. Queried only after the user enables that fallback.
 pub const INSTANCE_DIRECTORY_URL: &str = "https://cobalt.directory/api/working?type=api";
 
-/// Known-open instances used when the directory is unreachable. Refreshed
-/// from the live directory at runtime whenever possible.
+/// Legacy seeds used when the community directory is unreachable.
 pub const SEED_INSTANCES: [&str; 5] = [
     "https://api.qwkuns.me",
     "https://cobalt.alpha.wolfy.love",
@@ -54,6 +53,7 @@ pub struct CobaltRequest {
     pub audio_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio_bitrate: Option<String>,
+    pub local_processing: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -108,10 +108,15 @@ pub fn build_cobalt_request(
     audio_bitrate: Option<&str>,
 ) -> CobaltRequest {
     let is_audio = mode == DownloadMode::Audio;
+    let download_mode = match mode {
+        DownloadMode::Audio => Some("audio"),
+        DownloadMode::MutedVideo => Some("mute"),
+        DownloadMode::Video | DownloadMode::Image => None,
+    };
 
     CobaltRequest {
         url: url.to_string(),
-        download_mode: is_audio.then(|| "audio".to_string()),
+        download_mode: download_mode.map(str::to_string),
         audio_format: is_audio
             .then(|| audio_format.as_cobalt_value().map(str::to_string))
             .flatten(),
@@ -122,5 +127,6 @@ pub fn build_cobalt_request(
                     .map(str::to_string)
             })
             .flatten(),
+        local_processing: "disabled".to_string(),
     }
 }

@@ -5,6 +5,8 @@ use crate::models::{
 };
 use crate::providers::cobalt::{build_cobalt_request, CobaltResponse, CobaltStatus};
 use crate::providers::direct::{extract_media_links_from_html, is_direct_media_url};
+use crate::providers::gallery_dl::build_gallery_dl_args;
+use crate::providers::instagram::proxy_url as instagram_proxy_url;
 use crate::providers::plan_provider_order;
 use crate::providers::yt_dlp::{build_ytdlp_args, requires_ffmpeg_for_audio};
 use crate::settings::AppSettings;
@@ -48,6 +50,7 @@ fn orders_providers_fastest_safe_path_first() {
             ProviderKind::Direct,
             ProviderKind::YtDlp,
             ProviderKind::ConfiguredApi,
+            ProviderKind::GalleryDl,
             ProviderKind::HtmlProbe,
         ],
     );
@@ -60,6 +63,7 @@ fn skips_configured_api_when_disabled() {
         vec![
             ProviderKind::Direct,
             ProviderKind::YtDlp,
+            ProviderKind::GalleryDl,
             ProviderKind::HtmlProbe
         ],
     );
@@ -100,6 +104,7 @@ fn builds_cobalt_audio_request_payload() {
     assert_eq!(request.download_mode.as_deref(), Some("audio"));
     assert_eq!(request.audio_format.as_deref(), Some("mp3"));
     assert_eq!(request.audio_bitrate.as_deref(), Some("320"));
+    assert_eq!(request.local_processing, "disabled");
 }
 
 #[test]
@@ -160,12 +165,14 @@ fn wire_format_matches_frontend_types() {
         ProviderKind::ConfiguredApi,
         ProviderKind::PublicApi,
         ProviderKind::YtDlp,
+        ProviderKind::GalleryDl,
+        ProviderKind::InstagramProxy,
         ProviderKind::HtmlProbe,
     ])
     .expect("providers serialize");
     assert_eq!(
         provider_json,
-        r#"["direct","api","public-api","yt-dlp","html"]"#
+        r#"["direct","api","public-api","yt-dlp","gallery-dl","instagram-proxy","html"]"#
     );
 
     let planned = PlannedDownload {
@@ -262,4 +269,34 @@ fn caps_video_quality_in_ytdlp_format_selection() {
         8,
     );
     assert!(args.iter().any(|arg| arg.contains("height<=1080")));
+}
+
+#[test]
+fn builds_gallery_arguments_for_images_and_cookie_files() {
+    let cookies = crate::settings::CookieSource::File("C:/cookies.txt".to_string());
+    let args = build_gallery_dl_args(
+        "https://www.pinterest.com/pin/123/",
+        "C:/Downloads/staging",
+        DownloadMode::Image,
+        Some(&cookies),
+    );
+
+    assert!(args
+        .windows(2)
+        .any(|pair| pair == ["--directory", "C:/Downloads/staging"]));
+    assert!(args
+        .windows(2)
+        .any(|pair| pair == ["--cookies", "C:/cookies.txt"]));
+    assert!(args.iter().any(|arg| arg.contains("extension in")));
+}
+
+#[test]
+fn rewrites_only_public_instagram_post_routes() {
+    assert_eq!(
+        instagram_proxy_url("https://www.instagram.com/reels/DcV3RyRz0sq/?utm_source=share")
+            .as_deref(),
+        Some("https://www.kkkinstagram.com/reels/DcV3RyRz0sq/")
+    );
+    assert!(instagram_proxy_url("https://www.instagram.com/accounts/login/").is_none());
+    assert!(instagram_proxy_url("https://example.com/reels/DcV3RyRz0sq/").is_none());
 }

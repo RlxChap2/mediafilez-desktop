@@ -97,9 +97,10 @@ async fn resolve_remote_target(input: &str) -> Result<(Url, String, Vec<SocketAd
 
 async fn resolve_api_target(
     input: &str,
-    allow_loopback: bool,
+    original: &Url,
 ) -> Result<(Url, String, Vec<SocketAddr>), String> {
     let parsed = validate_api_endpoint(input)?;
+    let original_loopback = original.host().is_some_and(is_loopback_host);
     let explicit_loopback = parsed.host().is_some_and(is_loopback_host);
     let domain = parsed
         .host_str()
@@ -118,7 +119,7 @@ async fn resolve_api_target(
     };
     let allowed = |address: &SocketAddr| {
         is_public_ip(address.ip())
-            || (allow_loopback && explicit_loopback && address.ip().is_loopback())
+            || (original_loopback && explicit_loopback && address.ip().is_loopback())
     };
     if addresses.is_empty() || addresses.iter().any(|address| !allowed(address)) {
         return Err("The API endpoint resolves to a local or private network address.".to_string());
@@ -184,14 +185,13 @@ pub async fn secure_post_json<T: serde::Serialize + ?Sized>(
     timeout: Duration,
     authorization: Option<&str>,
     body: &T,
-    allow_loopback: bool,
 ) -> Result<reqwest::Response, String> {
     let original = validate_api_endpoint(input)?;
     let original_origin = original.origin();
     let mut current = original.to_string();
 
     for redirect_count in 0..=8 {
-        let (url, host, addresses) = resolve_api_target(&current, allow_loopback).await?;
+        let (url, host, addresses) = resolve_api_target(&current, &original).await?;
         let client = reqwest::Client::builder()
             .user_agent(user_agent)
             .redirect(reqwest::redirect::Policy::none())
@@ -356,15 +356,28 @@ mod tests {
     async fn api_post_blocks_private_targets() {
         let payload = serde_json::json!({ "url": "https://example.com/video" });
         let error = secure_post_json(
-            "https://127.0.0.1/api",
+            "https://192.168.1.1/api",
             "MediaFilez security test",
             Duration::from_secs(1),
             None,
             &payload,
-            false,
         )
         .await
-        .expect_err("public API requests must reject loopback targets");
+        .expect_err("API requests must reject private-network targets");
         assert!(error.contains("local or private"));
+    }
+
+    #[tokio::test]
+    async fn public_api_cannot_redirect_to_loopback() {
+        let public = validate_api_endpoint("https://example.com").expect("valid public endpoint");
+        let error = resolve_api_target("http://127.0.0.1/api", &public)
+            .await
+            .expect_err("public endpoints must not cross into loopback");
+        assert!(error.contains("local or private"));
+
+        let local = validate_api_endpoint("http://127.0.0.1:9000").expect("valid local endpoint");
+        resolve_api_target("http://127.0.0.1:9001/api", &local)
+            .await
+            .expect("explicit local endpoints may redirect within loopback");
     }
 }

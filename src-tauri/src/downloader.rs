@@ -1046,7 +1046,6 @@ struct CobaltEndpoint<'a> {
     base_url: &'a str,
     auth_header: Option<String>,
     timeout_seconds: u64,
-    allow_loopback: bool,
 }
 
 async fn cobalt_fetch(
@@ -1069,7 +1068,6 @@ async fn cobalt_fetch(
         std::time::Duration::from_secs(endpoint.timeout_seconds.max(5)),
         endpoint.auth_header.as_deref(),
         &payload,
-        endpoint.allow_loopback,
     )
     .await?
     .error_for_status()
@@ -1149,7 +1147,6 @@ async fn cobalt_download(
                 base_url,
                 auth_header: auth_header.clone(),
                 timeout_seconds: api.timeout_seconds,
-                allow_loopback: true,
             },
             cancel,
         )
@@ -1238,7 +1235,6 @@ async fn public_api_download(
                 base_url,
                 auth_header: None,
                 timeout_seconds: 30,
-                allow_loopback: false,
             },
             cancel,
         )

@@ -26,8 +26,8 @@ use crate::providers::gallery_dl::{build_gallery_dl_args, supports_mode as galle
 use crate::providers::instagram::proxy_url as instagram_proxy_url;
 use crate::providers::yt_dlp::build_ytdlp_args;
 use crate::security::{
-    is_safe_download_filename, secure_get, secure_redirect_policy, validate_api_endpoint,
-    validate_remote_target, validate_remote_url,
+    is_safe_download_filename, secure_get, secure_post_json, validate_remote_target,
+    validate_remote_url,
 };
 use crate::settings::{cobalt_endpoints, ApiProviderSettings, AppSettings, CookieSource};
 use crate::storage::{next_available_path, sanitize_filename};
@@ -1046,6 +1046,7 @@ struct CobaltEndpoint<'a> {
     base_url: &'a str,
     auth_header: Option<String>,
     timeout_seconds: u64,
+    allow_loopback: bool,
 }
 
 async fn cobalt_fetch(
@@ -1055,7 +1056,6 @@ async fn cobalt_fetch(
     endpoint: CobaltEndpoint<'_>,
     cancel: &AtomicBool,
 ) -> Result<PathBuf, String> {
-    validate_api_endpoint(endpoint.base_url)?;
     let payload = build_cobalt_request(
         &request.url,
         request.mode.clone(),
@@ -1063,29 +1063,17 @@ async fn cobalt_fetch(
         Some(request.audio_bitrate.as_str()),
     );
 
-    let client = reqwest::Client::builder()
-        .user_agent(APP_USER_AGENT)
-        .redirect(secure_redirect_policy())
-        .timeout(std::time::Duration::from_secs(
-            endpoint.timeout_seconds.max(5),
-        ))
-        .build()
-        .map_err(|error| format!("HTTP client error: {error}"))?;
-
-    let mut http_request = client
-        .post(endpoint.base_url)
-        .header("Accept", "application/json")
-        .json(&payload);
-    if let Some(header_value) = endpoint.auth_header {
-        http_request = http_request.header("Authorization", header_value);
-    }
-
-    let response = http_request
-        .send()
-        .await
-        .map_err(|error| format!("API request failed: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("API rejected the request: {error}"))?;
+    let response = secure_post_json(
+        endpoint.base_url,
+        APP_USER_AGENT,
+        std::time::Duration::from_secs(endpoint.timeout_seconds.max(5)),
+        endpoint.auth_header.as_deref(),
+        &payload,
+        endpoint.allow_loopback,
+    )
+    .await?
+    .error_for_status()
+    .map_err(|error| format!("API rejected the request: {error}"))?;
     let body = read_response_limited(response, MAX_API_RESPONSE_BYTES, "API response").await?;
     let response: CobaltResponse = serde_json::from_slice(&body)
         .map_err(|error| format!("API returned an unexpected response: {error}"))?;
@@ -1161,6 +1149,7 @@ async fn cobalt_download(
                 base_url,
                 auth_header: auth_header.clone(),
                 timeout_seconds: api.timeout_seconds,
+                allow_loopback: true,
             },
             cancel,
         )
@@ -1195,18 +1184,15 @@ async fn public_instances() -> Vec<String> {
     }
 
     let fetched: Option<Vec<String>> = async {
-        let client = reqwest::Client::builder()
-            .user_agent(DIRECTORY_USER_AGENT)
-            .timeout(std::time::Duration::from_secs(8))
-            .build()
-            .ok()?;
-        let response = client
-            .get(INSTANCE_DIRECTORY_URL)
-            .send()
-            .await
-            .ok()?
-            .error_for_status()
-            .ok()?;
+        let response = secure_get(
+            INSTANCE_DIRECTORY_URL,
+            DIRECTORY_USER_AGENT,
+            std::time::Duration::from_secs(8),
+        )
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?;
         let body = read_response_limited(response, MAX_API_RESPONSE_BYTES, "instance directory")
             .await
             .ok()?;
@@ -1252,6 +1238,7 @@ async fn public_api_download(
                 base_url,
                 auth_header: None,
                 timeout_seconds: 30,
+                allow_loopback: false,
             },
             cancel,
         )
@@ -1264,6 +1251,13 @@ async fn public_api_download(
     }
 
     Err(last_error)
+}
+
+async fn validate_html_media_target(url: &str) -> Result<(), String> {
+    validate_remote_target(url)
+        .await
+        .map(|_| ())
+        .map_err(|error| format!("The page exposed an unsafe media URL: {error}"))
 }
 
 /// Fetches the page HTML and downloads the first direct media link found.
@@ -1296,6 +1290,8 @@ async fn html_probe_download(
     let Some(media_url) = media_url else {
         return Err("The page did not expose media matching the selected format.".to_string());
     };
+
+    validate_html_media_target(media_url).await?;
 
     if is_stream_manifest_url(media_url) {
         let mut manifest_request = request.clone();
@@ -1670,6 +1666,14 @@ mod tests {
             cobalt_authorization(&settings),
             Some("Api-Key secret".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn rejects_private_media_urls_extracted_from_html() {
+        let error = validate_html_media_target("http://127.0.0.1/private.m3u8")
+            .await
+            .expect_err("HTML fallback must reject loopback manifests");
+        assert!(error.contains("unsafe media URL"));
     }
 
     #[tokio::test]

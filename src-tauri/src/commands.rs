@@ -7,7 +7,7 @@ use crate::downloader::{run_job, JobManager};
 use crate::models::{DownloadRequest, PlannedDownload, PreflightCheck, ProviderAttempt};
 use crate::providers::plan_provider_order;
 use crate::providers::yt_dlp::{build_ytdlp_args, requires_ffmpeg_for_audio};
-use crate::security::{is_safe_download_filename, validate_api_endpoint, validate_remote_url};
+use crate::security::{is_openable_media_filename, validate_api_endpoint, validate_remote_url};
 use crate::settings::{cobalt_endpoints, default_output_folder, validate_cookie_file, AppSettings};
 use crate::storage::validate_output_dir;
 use crate::tools::{self, ToolUpdatesReport, ToolsReport};
@@ -145,8 +145,8 @@ pub fn open_file<R: Runtime>(path: String, app: AppHandle<R>) -> Result<(), Stri
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| "The file name is invalid.".to_string())?;
-    if !is_safe_download_filename(filename) {
-        return Err("Opening executable or shortcut files is blocked.".to_string());
+    if !is_openable_media_filename(filename) {
+        return Err("Only verified media file types can be opened.".to_string());
     }
     app.opener()
         .open_path(path, None::<String>)

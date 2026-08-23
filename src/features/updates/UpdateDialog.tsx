@@ -1,5 +1,5 @@
 import { ArrowDownToLine, Check, RefreshCcw, Wrench, X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 
 import type { AppUpdateInfo, ToolUpdatesReport } from "../../lib/types";
 
@@ -15,7 +15,7 @@ type UpdateDialogProps = {
 
 function toolStatus(report: ToolUpdatesReport | null) {
   if (!report) return "Tool versions could not be checked.";
-  const updates = [report.ytDlp, report.deno, report.ffmpeg]
+  const updates = [report.ytDlp, report.galleryDl, report.deno, report.ffmpeg]
     .filter((tool) => tool.updateAvailable)
     .map((tool) => tool.name);
   if (updates.length === 0) return "Download tools are current.";
@@ -68,7 +68,7 @@ export function UpdateDialog({
           </div>
           <div>
             <h2 id="update-title">{hasUpdates ? "Update available" : "You are up to date"}</h2>
-            <p>{hasUpdates ? "Install now, or come back to it later." : "rsdownit and its managed tools are current."}</p>
+            <p>{hasUpdates ? "Install now, or come back to it later." : "MediaFilez Desktop and its managed tools are current."}</p>
           </div>
           {!installing && (
             <button type="button" className="icon-button quiet" aria-label="Close updates" onClick={onClose}>
@@ -81,7 +81,7 @@ export function UpdateDialog({
           <div className="update-row">
             <RefreshCcw aria-hidden="true" />
             <div>
-              <strong>rsdownit</strong>
+              <strong>MediaFilez Desktop</strong>
               <span>
                 {appUpdate
                   ? `${appUpdate.currentVersion} to ${appUpdate.version}`
@@ -103,7 +103,11 @@ export function UpdateDialog({
         {installing && (
           <div className="update-progress" role="status">
             <span>{progress === null ? "Downloading update" : `Downloading update ${progress}%`}</span>
-            <div><span style={{ width: `${progress ?? 12}%` }} /></div>
+            <div>
+              <span
+                style={{ "--progress": (progress ?? 12) / 100 } as CSSProperties}
+              />
+            </div>
           </div>
         )}
 

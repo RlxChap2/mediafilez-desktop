@@ -8,7 +8,7 @@ beforeEach(() => {
   window.localStorage.clear();
 });
 
-describe("rsdownit interactions", () => {
+describe("MediaFilez Desktop interactions", () => {
   it("enables download only for a complete link", async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -20,6 +20,9 @@ describe("rsdownit interactions", () => {
 
     await user.click(screen.getByRole("button", { name: /Audio/ }));
     expect(screen.getByRole("button", { name: "Download audio" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: /Image/ }));
+    expect(screen.getByRole("button", { name: "Download image" })).toBeEnabled();
   });
 
   it("shows audio format and gates bitrate behind advanced options", async () => {
@@ -60,8 +63,8 @@ describe("rsdownit interactions", () => {
     await user.click(screen.getByRole("button", { name: "Settings" }));
     await user.click(screen.getByRole("switch", { name: "Show advanced options" }));
     await user.type(
-      await screen.findByPlaceholderText("https://cobalt.example.com"),
-      "https://media.example.net",
+      await screen.findByPlaceholderText(/https:\/\/cobalt-one\.example/),
+      "https://media-one.example.net\nhttps://media-two.example.net",
     );
     await user.click(screen.getByRole("button", { name: "Save settings" }));
 
@@ -76,6 +79,6 @@ describe("rsdownit interactions", () => {
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Choose folder" }));
-    expect((await screen.findAllByText("Downloads\\rsdownit")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("Downloads\\MediaFilez")).length).toBeGreaterThan(0);
   });
 });

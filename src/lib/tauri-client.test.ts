@@ -6,7 +6,7 @@ import type { JobUpdate } from "./types";
 describe("browser fallback client", () => {
   it("chooses a deterministic output folder in browser tests", async () => {
     await expect(browserFallbackClient.chooseOutputFolder()).resolves.toBe(
-      "Downloads\\rsdownit",
+      "Downloads\\MediaFilez",
     );
   });
 
@@ -14,6 +14,7 @@ describe("browser fallback client", () => {
     const report = await browserFallbackClient.checkTools();
     expect(report.ready).toBe(true);
     expect(report.ytDlp.available).toBe(true);
+    expect(report.galleryDl.available).toBe(true);
     expect(report.deno.available).toBe(true);
   });
 

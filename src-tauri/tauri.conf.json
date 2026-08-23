@@ -1,8 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "rsdownit",
-  "version": "0.1.1",
-  "identifier": "com.rlxchap2.rsdownit",
+  "productName": "MediaFilez Desktop",
+  "mainBinaryName": "MediaFilez Desktop",
+  "version": "1.2.0",
+  "identifier": "com.rlxchap2.mediafilez-desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +13,7 @@
   "app": {
     "windows": [
       {
-        "title": "rsdownit",
+        "title": "MediaFilez Desktop",
         "width": 1180,
         "height": 760,
         "minWidth": 360,
@@ -41,8 +42,8 @@
     "publisher": "RlxChap2",
     "homepage": "https://github.com/RlxChap2/rsdownit",
     "category": "Utility",
-    "shortDescription": "Download public video and audio with local-first fallbacks.",
-    "longDescription": "rsdownit is a free, open-source desktop downloader for public media links. It uses a local engine first and optional user-approved fallbacks when a site needs another extraction method.",
+    "shortDescription": "Save public media with local-first extractors and verified fallbacks.",
+    "longDescription": "MediaFilez Desktop is a free, open-source downloader for public video, images, galleries, and audio. It manages its local extraction tools and can use user-approved fallbacks when a site needs another method.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

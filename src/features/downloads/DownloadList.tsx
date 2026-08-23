@@ -3,6 +3,7 @@ import {
   CircleAlert,
   Clock3,
   FolderOpen,
+  Image,
   KeyRound,
   ListVideo,
   Music,
@@ -99,7 +100,7 @@ export function DownloadList({
             return (
               <li className="job-row" key={job.id} data-status={job.status}>
                 <span className="job-media-icon" aria-hidden="true">
-                  {job.mode === "audio" ? <Music /> : <Video />}
+                  {job.mode === "audio" ? <Music /> : job.mode === "image" ? <Image /> : <Video />}
                 </span>
 
                 <div className="job-content">

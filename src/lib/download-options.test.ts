@@ -30,6 +30,8 @@ describe("download options", () => {
       "Direct media",
       "Your API",
       "yt-dlp",
+      "gallery-dl",
+      "Instagram embed fallback",
       "Community server",
       "HTML media scan",
     ]);

@@ -2,10 +2,10 @@ import {
   ArrowDownToLine,
   ClipboardPaste,
   FolderOpen,
+  Image,
   Link2,
   Music,
   Video,
-  VolumeX,
   X,
 } from "lucide-react";
 import { useId, type ReactNode } from "react";
@@ -23,6 +23,7 @@ import type {
 } from "../../lib/types";
 import { isProbablyUrl } from "../../lib/utils";
 import { Select } from "../../components/ui/select";
+import { Switch } from "../../components/ui/switch";
 
 type DownloadComposerProps = {
   url: string;
@@ -32,12 +33,14 @@ type DownloadComposerProps = {
   audioBitrate: AudioBitrate;
   outputFolder: string;
   showAdvanced: boolean;
+  removeAudio: boolean;
   activity: ReactNode;
   onUrlChange: (url: string) => void;
   onModeChange: (mode: DownloadMode) => void;
   onVideoQualityChange: (quality: VideoQuality) => void;
   onAudioFormatChange: (format: AudioFormat) => void;
   onAudioBitrateChange: (bitrate: AudioBitrate) => void;
+  onRemoveAudioChange: (value: boolean) => void;
   onPaste: () => void;
   onChooseFolder: () => void;
   onDownload: () => void;
@@ -45,8 +48,8 @@ type DownloadComposerProps = {
 
 const MODES = [
   { value: "video", label: "Video", description: "Picture and sound", icon: Video },
+  { value: "image", label: "Image", description: "Posts and galleries", icon: Image },
   { value: "audio", label: "Audio", description: "Sound only", icon: Music },
-  { value: "muted-video", label: "Muted", description: "Picture only", icon: VolumeX },
 ] satisfies Array<{
   value: DownloadMode;
   label: string;
@@ -62,12 +65,14 @@ export function DownloadComposer({
   audioBitrate,
   outputFolder,
   showAdvanced,
+  removeAudio,
   activity,
   onUrlChange,
   onModeChange,
   onVideoQualityChange,
   onAudioFormatChange,
   onAudioBitrateChange,
+  onRemoveAudioChange,
   onPaste,
   onChooseFolder,
   onDownload,
@@ -82,15 +87,9 @@ export function DownloadComposer({
 
   return (
     <section className="download-stage" aria-labelledby="download-title">
-      <header className="hero-copy">
-        <p className="eyebrow">Local-first media downloader</p>
-        <h2 id="download-title">
-          Download from <span>almost anywhere.</span>
-        </h2>
-        <p>
-          Paste a public media link. rsdownit finds the best available video or audio
-          without sending usage data anywhere.
-        </p>
+      <header className="workspace-intro">
+        <h2 id="download-title">Download media</h2>
+        <p>Paste a public link. MediaFilez tries local extractors first and keeps completed files on this PC.</p>
       </header>
 
       <form
@@ -100,14 +99,17 @@ export function DownloadComposer({
           if (ready) onDownload();
         }}
       >
+        <div className="composer-label-row">
+          <label htmlFor={urlId}>Media link</label>
+          <span>Public links · no telemetry</span>
+        </div>
         <div className={invalid ? "url-control is-error" : "url-control"}>
           <Link2 aria-hidden="true" />
-          <label className="sr-only" htmlFor={urlId}>Media link</label>
           <input
             id={urlId}
             value={url}
             onChange={(event) => onUrlChange(event.currentTarget.value)}
-            placeholder="Paste a video or audio link"
+            placeholder="https://example.com/post"
             spellCheck={false}
             autoComplete="url"
             inputMode="url"
@@ -164,20 +166,35 @@ export function DownloadComposer({
 
             <div className="format-row">
               {mode === "video" && (
-                <label className="field-group compact" htmlFor={qualityId}>
-                  <span>Video quality</span>
-                  <Select
-                    id={qualityId}
-                    value={videoQuality}
-                    onChange={(event) =>
-                      onVideoQualityChange(event.currentTarget.value as VideoQuality)
-                    }
-                  >
-                    {VIDEO_QUALITIES.map((quality) => (
-                      <option key={quality.value} value={quality.value}>{quality.label}</option>
-                    ))}
-                  </Select>
-                </label>
+                <>
+                  <label className="field-group compact" htmlFor={qualityId}>
+                    <span>Video quality</span>
+                    <Select
+                      id={qualityId}
+                      value={videoQuality}
+                      onChange={(event) =>
+                        onVideoQualityChange(event.currentTarget.value as VideoQuality)
+                      }
+                    >
+                      {VIDEO_QUALITIES.map((quality) => (
+                        <option key={quality.value} value={quality.value}>{quality.label}</option>
+                      ))}
+                    </Select>
+                  </label>
+                  {showAdvanced && (
+                    <label className="inline-toggle">
+                      <span>
+                        <strong>Remove audio</strong>
+                        <small>Save the video stream without a sound track.</small>
+                      </span>
+                      <Switch
+                        checked={removeAudio}
+                        onCheckedChange={onRemoveAudioChange}
+                        aria-label="Remove audio from video"
+                      />
+                    </label>
+                  )}
+                </>
               )}
 
               {mode === "audio" && (
@@ -215,8 +232,8 @@ export function DownloadComposer({
                 </>
               )}
 
-              {mode === "muted-video" && (
-                <p className="mode-note">Best video stream without an audio track.</p>
+              {mode === "image" && (
+                <p className="mode-note">Saves the image, carousel, or gallery exposed by the link.</p>
               )}
             </div>
 
@@ -233,7 +250,13 @@ export function DownloadComposer({
 
             <button type="submit" className="primary-button download-button" disabled={!ready}>
               <ArrowDownToLine aria-hidden="true" />
-              {mode === "audio" ? "Download audio" : "Download video"}
+              {mode === "audio"
+                ? "Download audio"
+                : mode === "image"
+                  ? "Download image"
+                  : removeAudio
+                    ? "Download muted video"
+                    : "Download video"}
             </button>
           </div>
 

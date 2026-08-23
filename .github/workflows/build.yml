@@ -154,7 +154,10 @@ jobs:
             Get-ChildItem 'src-tauri/target/release/bundle/msi' -Filter '*.msi' -File -ErrorAction SilentlyContinue
           )
           if ($files.Count -eq 0) { throw 'No Windows release files were produced.' }
-          foreach ($file in $files) { Copy-Item -LiteralPath $file.FullName -Destination $artifactDir }
+          foreach ($file in $files) {
+            $releaseName = $file.Name.Replace(' ', '.')
+            Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $artifactDir $releaseName)
+          }
           $lines = Get-ChildItem $artifactDir -File | Sort-Object Name | ForEach-Object {
             $digest = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$digest *$($_.Name)"

@@ -31,7 +31,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlFQUUwQzc5OTY5OEE3ODcKUldTSHA1aVdlUXl1bnFjaURWLy9nVzdTZkNsZnRNemdXM1F5ZHV5ZW5tSXYxV1BYdTEybDVUdHYK",
       "endpoints": [
-        "https://github.com/RlxChap2/rsdownit/releases/latest/download/latest.json"
+        "https://github.com/RlxChap2/mediafilez-desktop/releases/latest/download/latest.json"
       ]
     }
   },
@@ -40,7 +40,7 @@
     "createUpdaterArtifacts": false,
     "targets": "all",
     "publisher": "RlxChap2",
-    "homepage": "https://github.com/RlxChap2/rsdownit",
+    "homepage": "https://github.com/RlxChap2/mediafilez-desktop",
     "category": "Utility",
     "shortDescription": "Save public media with local-first extractors and verified fallbacks.",
     "longDescription": "MediaFilez Desktop is a free, open-source downloader for public video, images, galleries, and audio. It manages its local extraction tools and can use user-approved fallbacks when a site needs another method.",

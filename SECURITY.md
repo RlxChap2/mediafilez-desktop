@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Use a [private GitHub security advisory](https://github.com/RlxChap2/rsdownit/security/advisories/new). Include the affected version, reproduction steps and impact. Do not post working exploits, tokens or private URLs in a public issue.
+Use a [private GitHub security advisory](https://github.com/RlxChap2/mediafilez-desktop/security/advisories/new). Include the affected version, reproduction steps and impact. Do not post working exploits, tokens or private URLs in a public issue.
 
 The latest release and the `main` branch receive security fixes.
 

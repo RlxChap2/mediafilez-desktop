@@ -167,7 +167,7 @@ pub fn show_in_folder<R: Runtime>(path: String, app: AppHandle<R>) -> Result<(),
 #[tauri::command]
 pub fn open_link<R: Runtime>(url: String, app: AppHandle<R>) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    if url != "https://github.com/RlxChap2/rsdownit" {
+    if url != "https://github.com/RlxChap2/mediafilez-desktop" {
         return Err("This external link is not allowed.".to_string());
     }
     app.opener()

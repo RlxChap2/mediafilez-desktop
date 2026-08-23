@@ -30,9 +30,8 @@ import { useTheme } from "../lib/use-theme";
 import { isProbablyUrl } from "../lib/utils";
 import "../styles/app.css";
 
-const REPO_URL = "https://github.com/RlxChap2/rsdownit";
+const REPO_URL = "https://github.com/RlxChap2/mediafilez-desktop";
 const HISTORY_KEY = "mediafilez-desktop-history-v1";
-const LEGACY_HISTORY_KEY = "rsdownit-history-v1";
 const AUTOSTART_KEY = "mediafilez-desktop-autostart";
 const ADVANCED_KEY = "mediafilez-desktop-advanced";
 
@@ -44,18 +43,14 @@ const initialApiProvider: ApiProviderSettings = {
   timeoutSeconds: 20,
 };
 
-function readPref(key: string, legacyKey: string, fallback: boolean) {
-  const stored = window.localStorage.getItem(key) ?? window.localStorage.getItem(legacyKey);
+function readPref(key: string, fallback: boolean) {
+  const stored = window.localStorage.getItem(key);
   return stored === null ? fallback : stored === "true";
 }
 
 function readHistory(): JobItem[] {
   try {
-    const value = JSON.parse(
-      window.localStorage.getItem(HISTORY_KEY) ??
-        window.localStorage.getItem(LEGACY_HISTORY_KEY) ??
-        "[]",
-    );
+    const value = JSON.parse(window.localStorage.getItem(HISTORY_KEY) ?? "[]");
     if (!Array.isArray(value)) return [];
     return value
       .filter(
@@ -105,12 +100,8 @@ function App() {
   >("firefox");
   const [cookieBrowserProfile, setCookieBrowserProfile] = useState("");
   const [cookieFile, setCookieFile] = useState("");
-  const [autoStart, setAutoStart] = useState(() =>
-    readPref(AUTOSTART_KEY, "rsdownit-autostart", false),
-  );
-  const [showAdvanced, setShowAdvanced] = useState(() =>
-    readPref(ADVANCED_KEY, "rsdownit-advanced", false),
-  );
+  const [autoStart, setAutoStart] = useState(() => readPref(AUTOSTART_KEY, false));
+  const [showAdvanced, setShowAdvanced] = useState(() => readPref(ADVANCED_KEY, false));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tools, setTools] = useState<ToolsReport | null>(null);
   const [checkingTools, setCheckingTools] = useState(false);

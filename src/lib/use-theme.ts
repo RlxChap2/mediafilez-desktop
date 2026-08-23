@@ -6,8 +6,7 @@ const THEME_KEY = "mediafilez-desktop-theme";
 
 export function useTheme() {
   const [theme, setTheme] = useState<Theme>(() => {
-    const saved =
-      window.localStorage.getItem(THEME_KEY) ?? window.localStorage.getItem("rsdownit-theme");
+    const saved = window.localStorage.getItem(THEME_KEY);
     if (saved === "light" || saved === "dark") return saved;
     return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   });

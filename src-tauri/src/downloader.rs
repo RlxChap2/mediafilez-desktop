@@ -42,7 +42,7 @@ const BROWSER_USER_AGENT: &str = concat!(
 const DIRECTORY_USER_AGENT: &str = concat!(
     "MediaFilez Desktop/",
     env!("CARGO_PKG_VERSION"),
-    " (github.com/RlxChap2/rsdownit)"
+    " (github.com/RlxChap2/mediafilez-desktop)"
 );
 const MAX_API_RESPONSE_BYTES: usize = 1024 * 1024;
 const MAX_HTML_BYTES: usize = 5 * 1024 * 1024;

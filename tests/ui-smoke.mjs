@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { createServer } from "vite";
 
-const externalUrl = process.env.RSDOWNIT_TEST_URL;
+const externalUrl = process.env.MEDIAFILEZ_TEST_URL;
 const server = externalUrl
   ? null
   : await createServer({ server: { port: 4173, strictPort: false, hmr: false } });

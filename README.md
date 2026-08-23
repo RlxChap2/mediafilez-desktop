@@ -1,6 +1,6 @@
 # MediaFilez Desktop
 
-[![CI](https://github.com/RlxChap2/rsdownit/actions/workflows/build.yml/badge.svg)](https://github.com/RlxChap2/rsdownit/actions/workflows/build.yml)
+[![CI](https://github.com/RlxChap2/mediafilez-desktop/actions/workflows/build.yml/badge.svg)](https://github.com/RlxChap2/mediafilez-desktop/actions/workflows/build.yml)
 
 MediaFilez Desktop saves public videos, images, galleries, and audio on Windows. Paste a link, choose one of three output modes, and let the app work through a local-first resolver chain. The queue can run four jobs at once, keeps history on the device, and never overwrites an existing file.
 
@@ -78,7 +78,7 @@ Security reports should follow the private process in [SECURITY.md](SECURITY.md)
 
 ## Download and verify a release
 
-Windows builds are published on the [Releases page](https://github.com/RlxChap2/rsdownit/releases). Each release includes `SHA256SUMS.txt` and displays the same checksums in its release notes. Signed updater builds also include the updater manifest and signature.
+Windows builds are published on the [Releases page](https://github.com/RlxChap2/mediafilez-desktop/releases). Each release includes `SHA256SUMS.txt` and displays the same checksums in its release notes. Signed updater builds also include the updater manifest and signature.
 
 Compare a downloaded file with the published checksum:
 
@@ -96,7 +96,7 @@ The repository also includes a verification helper:
 GitHub build provenance can be checked with the GitHub CLI:
 
 ```powershell
-gh attestation verify '.\MediaFilez Desktop.exe' --repo RlxChap2/rsdownit
+gh attestation verify '.\MediaFilez Desktop.exe' --repo RlxChap2/mediafilez-desktop
 ```
 
 A checksum confirms file identity, while the attestation links the file to this repository's GitHub Actions workflow. Windows publisher reputation is separate: releases need a publicly trusted Authenticode certificate, or Microsoft Store signing for an MSIX package, to identify the publisher to SmartScreen. A self-signed certificate does not provide that reputation.

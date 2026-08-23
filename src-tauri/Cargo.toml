@@ -4,7 +4,7 @@ version = "1.2.0"
 description = "MediaFilez desktop downloader for public video, images, galleries, and audio"
 authors = ["RlxChap2"]
 license = "MIT"
-repository = "https://github.com/RlxChap2/rsdownit"
+repository = "https://github.com/RlxChap2/mediafilez-desktop"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

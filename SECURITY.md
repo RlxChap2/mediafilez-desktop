@@ -8,17 +8,19 @@ The latest release and the `main` branch receive security fixes.
 
 ## Trust boundaries
 
-rsdownit processes untrusted URLs and launches external media tools. The important boundaries are:
+MediaFilez Desktop processes untrusted URLs and launches external media tools. The trust boundaries are:
 
 - The React view can call only the Tauri commands and dialog capability declared by the app.
 - User media URLs are accepted only over HTTP or HTTPS. Literal and DNS-resolved private, loopback, link-local and local-domain targets are rejected. Built-in GET requests pin the checked public addresses and recheck every redirect.
-- Direct downloads reject HTML responses and executable or shortcut filename extensions.
-- Managed yt-dlp, Deno, and FFmpeg tools are downloaded over HTTPS from publisher locations and installed only after their published SHA-256 matches.
-- A `PATH` copy of yt-dlp, Deno, or FFmpeg is trusted as a system-managed tool and is clearly marked as unverified by rsdownit.
-- Browser-cookie access, cookie-file selection, and third-party Cobalt requests require an explicit user setting. Cookie contents are not copied into rsdownit settings.
+- Direct and fallback downloads reject HTML, JSON, XML, empty files, executable filenames, and shortcuts.
+- Managed yt-dlp, gallery-dl, Deno, and FFmpeg tools are downloaded over HTTPS from publisher locations and installed only after their published SHA-256 matches.
+- A `PATH` copy of yt-dlp, gallery-dl, Deno, or FFmpeg is trusted as a system-managed tool and is marked as unverified by MediaFilez Desktop.
+- Browser-cookie access, cookie-file selection, community Cobalt, and the Instagram embed fallback require an explicit user setting. Cookie contents are not copied into app settings.
+- Configured Cobalt endpoints receive only the source URL and the authentication method selected by the user. API tokens stay in memory.
+- The Instagram embed fallback accepts only canonical Instagram post routes, sends no cookies or tokens, and accepts final media only from Instagram CDN host suffixes.
 - API tokens are held in memory and removed from the persisted settings copy.
 
-The external yt-dlp process resolves hosts itself after rsdownit validates them. A hostile DNS service can still change its answer in that short interval. Do not use rsdownit as a network service or expose its Tauri command channel to untrusted pages.
+External yt-dlp and gallery-dl processes resolve hosts after MediaFilez Desktop validates the submitted URL. A hostile DNS service can still change its answer in that short interval. Do not use the app as a network service or expose its Tauri command channel to untrusted pages.
 
 ## Release integrity
 
@@ -44,7 +46,7 @@ If a release is flagged:
 
 ## Out of scope
 
-- Problems caused by an unsupported or outdated system copy of yt-dlp or FFmpeg.
+- Problems caused by an unsupported or outdated system copy of yt-dlp, gallery-dl, or FFmpeg.
 - A website changing its extractor behavior without a security impact.
 - DRM or paywall bypass requests.
 - Downloads performed without permission from the rights holder or service.
